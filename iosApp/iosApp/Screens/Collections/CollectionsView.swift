@@ -1,6 +1,6 @@
 import SwiftUI
 
-func libraryCollectionAccessibilityLabel(_ collection: LibraryCollection) -> String {
+func libraryCollectionAccessibilityLabel(_ collection: LibraryCollection, showItemCount: Bool = true) -> String {
     let type = collection.kind == .userCollections
         ? "User collection"
         : collection.collectionType?.capitalized ?? "Collection"
@@ -9,7 +9,7 @@ func libraryCollectionAccessibilityLabel(_ collection: LibraryCollection) -> Str
     } else {
         "Smart"
     }
-    return [collection.name, type, count].joined(separator: ", ")
+    return (showItemCount ? [collection.name, type, count] : [collection.name, type]).joined(separator: ", ")
 }
 
 /// List of user-created collections, grouped into named buckets +
@@ -503,6 +503,7 @@ private class LibraryCollectionsViewModel {
 
 struct LibraryCollectionsView: View {
     let libraryId: Int
+    var mediaScope: LibraryVideoScope? = nil
 
     @State private var viewModel = LibraryCollectionsViewModel()
     @State private var uiCustomization = UICustomizationPreferences.shared
@@ -571,18 +572,20 @@ struct LibraryCollectionsView: View {
                             libraryId: libraryId,
                             collectionId: collection.id,
                             title: collection.name,
-                            kind: collection.kind
+                            kind: collection.kind,
+                            mediaScope: mediaScope
                         )
                     ) {
                         LibraryCollectionCard(
                             collection: collection,
-                            cardWidthOverride: libraryCollectionCardWidthOverride
+                            cardWidthOverride: libraryCollectionCardWidthOverride,
+                            showItemCount: mediaScope == nil
                         )
                     }
                     .buttonStyle(.plain)
                     .frame(maxWidth: .infinity)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(libraryCollectionAccessibilityLabel(collection))
+                    .accessibilityLabel(libraryCollectionAccessibilityLabel(collection, showItemCount: mediaScope == nil))
                 }
             }
             #if os(iOS)
@@ -617,6 +620,7 @@ struct LibraryCollectionsView: View {
 private struct LibraryCollectionCard: View {
     let collection: LibraryCollection
     let cardWidthOverride: CGFloat?
+    var showItemCount = true
     @State private var uiCustomization = UICustomizationPreferences.shared
 
     private var cardWidth: CGFloat {
@@ -632,14 +636,16 @@ private struct LibraryCollectionCard: View {
             ZStack(alignment: .bottomTrailing) {
                 poster
 
-                Text(countLabel)
-                    .font(.siloSmall)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
-                    .background(Color.black.opacity(0.65))
-                    .clipShape(Capsule())
-                    .padding(8)
+                if showItemCount {
+                    Text(countLabel)
+                        .font(.siloSmall)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 5)
+                        .background(Color.black.opacity(0.65))
+                        .clipShape(Capsule())
+                        .padding(8)
+                }
             }
             .frame(width: cardWidth, height: cardHeight)
             .clipShape(RoundedRectangle(cornerRadius: SiloTheme.smallCornerRadius))

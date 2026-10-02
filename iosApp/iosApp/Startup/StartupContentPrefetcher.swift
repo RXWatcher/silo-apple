@@ -604,10 +604,11 @@ enum StartupContentPrefetcher {
     /// uses for page 2, so the prefetch and the live grid share one query.
     static func fetchBrowseFirstPage(
         libraryId: Int?,
-        state: CatalogFilterState = .none
+        state: CatalogFilterState = .none,
+        mediaScope: LibraryVideoScope? = nil
     ) async throws -> CatalogListPage {
         let generation = profileScopedGeneration
-        let key = CacheKey.browse(libraryId: libraryId, filterKey: state.cacheKeyFragment)
+        let key = CacheKey.browse(libraryId: libraryId, filterKey: state.cacheKeyFragment, mediaScope: mediaScope?.rawValue)
         // Verbose for the same reason as `library_sections`, and the cache key
         // (library id plus the user's filter selections) is never logged.
         #if os(iOS) || os(tvOS)
@@ -622,15 +623,15 @@ enum StartupContentPrefetcher {
             task = existing
         } else {
             task = Task {
-                // iOS omits `type` (library_id already scopes the page); the
-                // builder is the single source of the wire format, and later
-                // pages follow this page's continuation.
+                // A mixed library's navigation scope is independent of optional
+                // filter groups. Later pages retain it in the continuation.
                 let query = CatalogQueryBuilder.build(
                     state,
                     libraryId: libraryId,
                     mediaType: .movie,
                     limit: browsePageSize,
-                    includeType: false
+                    includeType: false,
+                    enforcedScope: mediaScope
                 )
                 return try await SiloAPI.shared.catalogPage(query)
             }
