@@ -2,6 +2,36 @@ import XCTest
 @testable import Silo
 
 final class LibraryVideoScopeTests: XCTestCase {
+    func testSectionPagingDoesNotSendFilterOverlays() throws {
+        var query = APIv2CatalogQuery()
+        query.source = "section"
+        query.scope = "library"
+        query.libraryId = "7"
+        query.sectionId = "recent"
+        query.limit = 100
+        let parameters = try query.getParameters()
+        XCTAssertEqual(parameters["section_id"], "recent")
+        XCTAssertEqual(parameters["library_id"], "7")
+        XCTAssertNil(parameters["match"])
+        XCTAssertNil(parameters["type"])
+        XCTAssertNil(parameters["sort"])
+    }
+
+    func testPagedEpisodePreservesPlaybackContext() throws {
+        let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let item = try decoder.decode(BrowseItem.self, from: Data("""
+        {"id":"episode","type":"episode","title":"Episode","series_id":"show","series_title":"Show",
+         "season_number":2,"episode_number":3,"position_seconds":73,"duration_seconds":1200,"item_source":"continue_watching"}
+        """.utf8))
+        let sectionItem = SectionItem(browseItem: item)
+        XCTAssertEqual(sectionItem.seriesId, "show")
+        XCTAssertEqual(sectionItem.seasonNumber, 2)
+        XCTAssertEqual(sectionItem.episodeNumber, 3)
+        XCTAssertEqual(sectionItem.positionSeconds, 73)
+        XCTAssertEqual(sectionItem.durationSeconds, 1200)
+        XCTAssertEqual(sectionItem.itemSource, "continue_watching")
+    }
+
     func testSeriesTabCannotBeBroadenedBySavedTypeOrMatchAny() throws {
         var filters = CatalogFilterState()
         filters.mediaScope = "movie"
