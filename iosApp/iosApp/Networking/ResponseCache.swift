@@ -225,9 +225,10 @@ enum CacheKey {
     static func itemUserState(_ contentId: String) -> String { "\(itemDetail(contentId)):userState" }
     static func itemWatchDetail(_ contentId: String, libraryId: Int? = nil) -> String { "\(itemDetail(contentId, libraryId: libraryId)):watchDetail" }
     /// Browse grid page-1 cache, keyed by the full filter/sort state
-    /// (`CatalogFilterState.cacheKeyFragment`).
-    static func browse(libraryId: Int?, filterKey: String) -> String {
-        "browse:v2:\(libraryId.map(String.init) ?? "all"):\(filterKey)"
+    /// (`CatalogFilterState.cacheKeyFragment`) and, for a mixed library,
+    /// the selected movies/series scope so the two never share a page.
+    static func browse(libraryId: Int?, filterKey: String, mediaScope: String? = nil) -> String {
+        "browse:v2:\(libraryId.map(String.init) ?? "all"):\(filterKey)" + (mediaScope.map { ".type-\($0)" } ?? "")
     }
     /// Per-library facet vocabulary from `/catalog/filters`.
     static func catalogFilters(libraryId: Int?, includeTechnical: Bool = true) -> String {

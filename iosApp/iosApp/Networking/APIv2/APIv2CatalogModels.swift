@@ -211,6 +211,7 @@ extension APIv2CatalogQuery {
 /// continuation keeps the original query and owner, so a screen pages by
 /// handing it back rather than rebuilding the request.
 struct CatalogListPage {
+    let auth: CapturedOrdinaryRequestAuth
     let response: CatalogResponse
     let continuation: APIv2CatalogContinuation?
     /// This is a fresh first page read in place of a rejected cursor, so the
@@ -218,6 +219,7 @@ struct CatalogListPage {
     let startsOver: Bool
 
     init(_ result: APIv2CatalogResult, startsOver: Bool = false) {
+        auth = result.auth
         response = CatalogResponse(catalogPage: result.value)
         continuation = result.continuation
         self.startsOver = startsOver

@@ -28,6 +28,7 @@ struct TVLibraryBrowseView: View {
     @State private var isLoadingSections = true
     @State private var sectionsError: ErrorState? = nil
     @State private var scopeIncomplete = false
+    @State private var loadGeneration = 0
 
     @Environment(AppRouter.self) private var router
 
@@ -109,6 +110,11 @@ struct TVLibraryBrowseView: View {
     // MARK: - Data
 
     private func loadContent() async {
+        loadGeneration += 1
+        let requestGeneration = loadGeneration
+        defer {
+            if requestGeneration == loadGeneration { isLoadingSections = false }
+        }
         let scopedCacheKey = mediaScope.map { CacheKey.librarySections(library.id) + ".type-\($0.rawValue)" }
         if sections.isEmpty, let scopedCacheKey,
            let cached: (sections: [ResolvedSection], incomplete: Bool) = ResponseCache.shared.get(scopedCacheKey) {
@@ -143,24 +149,26 @@ struct TVLibraryBrowseView: View {
                                              next: page.continuation, startsOver: page.startsOver)
                 }
                 guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
-                try Task.checkCancellation()
+                guard requestGeneration == loadGeneration, !Task.isCancelled else { return }
                 sections = scoped.map(\.section)
                 scopeIncomplete = scoped.contains { $0.incomplete }
                 if let scopedCacheKey {
                     ResponseCache.shared.set((sections: sections, incomplete: scopeIncomplete), for: scopedCacheKey)
                 }
             } else {
-                let response = try await StartupContentPrefetcher.fetchLibrarySections(libraryId: library.id)
-                sections = response.sections
+                let read = try await StartupContentPrefetcher.fetchLibrarySectionsRead(libraryId: library.id)
+                guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
+                guard requestGeneration == loadGeneration, !Task.isCancelled else { return }
+                sections = read.response.sections
             }
         } catch {
+            guard requestGeneration == loadGeneration, !Task.isCancelled else { return }
             if error is CancellationError { return }
             if case HTTPError.requestIdentityChanged = error { sections = [] }
             if case HTTPError.authorityChanged = error { sections = [] }
             sectionsError = ErrorState(error)
             scopeIncomplete = mediaScope != nil && !sections.isEmpty
         }
-        isLoadingSections = false
     }
 }
 

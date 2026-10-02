@@ -122,6 +122,8 @@ private extension BrowseItem {
          backdropUrl: String?, backdropThumbhash: String?) {
         self.init(
             contentId: seriesId, type: "series", title: title,
+            seriesId: nil, seriesTitle: nil, seasonNumber: nil, episodeNumber: nil,
+            itemSource: nil, positionSeconds: nil, durationSeconds: nil, progressUpdatedAt: nil,
             year: nil, genres: nil, contentRating: nil,
             advisoryAge: nil, advisorySource: nil, status: nil,
             ratingImdb: nil, ratingTmdb: nil, ratingRtCritic: nil, ratingRtAudience: nil,

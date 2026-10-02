@@ -84,8 +84,12 @@ struct TVLibraryGridView: View {
         }
     }
 
+    /// A library shuffle has no media type, so the Movies or Series view of
+    /// a mixed library would shuffle titles of both types.
     private var canShuffle: Bool {
-        ShuffleAvailability.isShuffleLibraryType(libraryType) && ShuffleFeatureStore.shared.supports(.library)
+        mediaScope == nil
+            && ShuffleAvailability.isShuffleLibraryType(libraryType)
+            && ShuffleFeatureStore.shared.supports(.library)
     }
 
     var body: some View {

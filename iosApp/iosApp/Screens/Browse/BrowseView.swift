@@ -6,6 +6,7 @@ struct BrowseView: View {
     var title: String? = "Browse"
     var showsSearchShortcut = true
     var libraryType: String? = nil
+    var mediaScope: LibraryVideoScope? = nil
 
     @State private var viewModel = BrowseViewModel()
     @State private var showFilters = false
@@ -49,8 +50,8 @@ struct BrowseView: View {
         .sheet(isPresented: $showFilters) {
             FilterView(viewModel: viewModel)
         }
-        .task(id: BrowseConfigurationID(libraryId: libraryId, libraryType: libraryType)) {
-            guard await viewModel.configure(libraryId: libraryId, libraryType: libraryType) else { return }
+        .task(id: BrowseConfigurationID(libraryId: libraryId, libraryType: libraryType, mediaScope: mediaScope)) {
+            guard await viewModel.configure(libraryId: libraryId, libraryType: libraryType, mediaScope: mediaScope) else { return }
             await viewModel.loadItems(reset: true)
             await viewModel.loadFacetsIfNeeded()
         }
@@ -198,8 +199,10 @@ struct BrowseView: View {
     }
 
     /// The library a Shuffle chip plays from; nil where Shuffle isn't offered.
+    /// A library shuffle has no media type, so the Movies or Series view of a
+    /// mixed library doesn't offer it.
     private var shuffleLibraryId: Int? {
-        guard let libraryId,
+        guard let libraryId, mediaScope == nil,
               ShuffleAvailability.isShuffleLibraryType(libraryType),
               ShuffleFeatureStore.shared.supports(.library) else { return nil }
         return libraryId
@@ -318,6 +321,7 @@ struct BrowseView: View {
 private struct BrowseConfigurationID: Hashable {
     let libraryId: Int?
     let libraryType: String?
+    let mediaScope: LibraryVideoScope?
 }
 
 enum LibraryPageTab: String, CaseIterable, Identifiable {
@@ -381,24 +385,78 @@ private class LibraryRecommendedViewModel {
     var sections: [ResolvedSection] = []
     var isLoading = false
     var error: ErrorState?
+    var scopeIncomplete = false
+    private var identity: String?
+    private var generation = 0
 
-    func loadSections(libraryId: Int) async {
-        if sections.isEmpty,
-           let cached: SectionsResponse = ResponseCache.shared.get(CacheKey.librarySections(libraryId)) {
-            sections = Self.displayed(cached.sections)
+    func loadSections(libraryId: Int, mediaScope: LibraryVideoScope?) async {
+        generation += 1
+        let run = generation
+        let key = CacheKey.librarySections(libraryId) + (mediaScope.map { ".type-\($0.rawValue)" } ?? "")
+        if identity != key {
+            identity = key
+            sections = []
+            scopeIncomplete = false
+        }
+        if sections.isEmpty {
+            if mediaScope != nil,
+               let cached: (sections: [ResolvedSection], incomplete: Bool) = ResponseCache.shared.get(key) {
+                sections = cached.sections
+                scopeIncomplete = cached.incomplete
+            } else if mediaScope == nil,
+                      let cached: SectionsResponse = ResponseCache.shared.get(key) {
+                sections = Self.displayed(cached.sections)
+            }
         }
         isLoading = sections.isEmpty
         error = nil
+        let writeToken = ResponseCache.shared.writeToken
 
         do {
-            let response = try await StartupContentPrefetcher.fetchLibrarySections(libraryId: libraryId)
-            sections = Self.displayed(response.sections)
-        } catch let err {
-            if sections.isEmpty {
-                error = ErrorState(err)
+            let read = try await StartupContentPrefetcher.fetchLibrarySectionsRead(libraryId: libraryId)
+            let rows = read.response.sections.filter { !$0.isFeatured }
+            let loaded: [ResolvedSection]
+            let incomplete: Bool
+            if let mediaScope {
+                let scoped = try await mediaScope.refillSections(rows) { (row: ResolvedSection, cursor: APIv2CatalogContinuation?) in
+                    guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
+                    let page: CatalogListPage
+                    if let cursor {
+                        page = try await SiloAPI.shared.nextCatalogPage(cursor)
+                    } else {
+                        var query = APIv2CatalogQuery()
+                        query.source = "section"
+                        query.scope = "library"
+                        query.libraryId = String(libraryId)
+                        query.sectionId = row.id
+                        query.limit = 100
+                        page = try await SiloAPI.shared.catalogPage(query)
+                    }
+                    guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
+                    return LibraryScopedPage(items: page.response.items.map { SectionItem(browseItem: $0) },
+                                             next: page.continuation, startsOver: page.startsOver)
+                }
+                loaded = scoped.map(\.section)
+                incomplete = scoped.contains { $0.incomplete }
+            } else {
+                loaded = rows
+                incomplete = false
             }
+            guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
+            guard run == generation, !Task.isCancelled else { return }
+            sections = loaded.filter { !$0.items.isEmpty }
+            scopeIncomplete = incomplete
+            if mediaScope != nil {
+                ResponseCache.shared.set((sections: sections, incomplete: incomplete), for: key, fetchedAt: writeToken)
+            }
+        } catch {
+            guard run == generation, !Task.isCancelled else { return }
+            if error is CancellationError { return }
+            if case HTTPError.requestIdentityChanged = error { sections = [] }
+            if case HTTPError.authorityChanged = error { sections = [] }
+            if sections.isEmpty { self.error = ErrorState(error) }
+            scopeIncomplete = mediaScope != nil
         }
-
         isLoading = false
     }
 
@@ -409,6 +467,7 @@ private class LibraryRecommendedViewModel {
 
 struct LibraryRecommendedView: View {
     let libraryId: Int
+    var mediaScope: LibraryVideoScope? = nil
 
     @State private var viewModel = LibraryRecommendedViewModel()
     @State private var refreshPill = RefreshStatusPillState()
@@ -420,10 +479,12 @@ struct LibraryRecommendedView: View {
                 if !viewModel.sections.isEmpty {
                     content
                 } else if let error = viewModel.error {
-                    ErrorView(state: error, onRetry: { Task { await viewModel.loadSections(libraryId: libraryId) } })
+                    ErrorView(state: error, onRetry: { Task { await viewModel.loadSections(libraryId: libraryId, mediaScope: mediaScope) } })
                 } else if viewModel.isLoading {
                     PosterRowsSkeleton()
                         .padding(.top, SiloTheme.padding)
+                } else if viewModel.scopeIncomplete {
+                    scopeNotice
                 } else {
                     EmptyStateView(
                         icon: "rectangle.stack.fill",
@@ -448,8 +509,8 @@ struct LibraryRecommendedView: View {
         .animation(.easeInOut(duration: 0.18), value: refreshPill.isVisible)
         .animation(.easeInOut(duration: 0.18), value: ConnectionMonitor.shared.isOffline)
         .siloPageBackground()
-        .task(id: libraryId) {
-            await viewModel.loadSections(libraryId: libraryId)
+        .task(id: "\(libraryId):\(mediaScope?.rawValue ?? "all")") {
+            await viewModel.loadSections(libraryId: libraryId, mediaScope: mediaScope)
         }
         .refreshable {
             await refreshRecommendations()
@@ -459,6 +520,7 @@ struct LibraryRecommendedView: View {
     private var content: some View {
         ScrollView(.vertical, showsIndicators: false) {
             LazyVStack(spacing: SiloTheme.largePadding) {
+                if viewModel.scopeIncomplete { scopeNotice }
                 ForEach(viewModel.sections) { section in
                     SectionRow(
                         section: section,
@@ -481,9 +543,19 @@ struct LibraryRecommendedView: View {
         .environment(\.browseLibraryId, libraryId)
     }
 
+    private var scopeNotice: some View {
+        VStack(spacing: SiloTheme.smallPadding) {
+            Text("Some shelves could not be fully loaded. Retry or open Library to browse all titles.")
+                .font(.siloCaption)
+                .foregroundStyle(Color.siloSecondaryText)
+            Button("Retry") { Task { await viewModel.loadSections(libraryId: libraryId, mediaScope: mediaScope) } }
+        }
+        .padding(SiloTheme.padding)
+    }
+
     private func refreshRecommendations() async {
         await refreshPill.run {
-            await viewModel.loadSections(libraryId: libraryId)
+            await viewModel.loadSections(libraryId: libraryId, mediaScope: mediaScope)
         }
     }
 }

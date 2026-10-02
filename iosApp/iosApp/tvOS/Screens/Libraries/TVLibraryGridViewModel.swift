@@ -76,7 +76,7 @@ final class TVLibraryGridViewModel {
     // MARK: - First page
 
     /// The filter a grid opened without a deep-linked filter starts with.
-    /// A mixed library's Movies/Series tab keeps its own saved state.
+    /// A mixed library's Movies and Series views keep separate filters.
     static func savedFilter(libraryId: Int, mediaScope: LibraryVideoScope? = nil) -> CatalogFilterState {
         BrowsePrefsStore.shared.savedState(libraryId: libraryId, mediaScope: mediaScope?.rawValue) ?? .none
     }
@@ -272,13 +272,17 @@ final class TVLibraryGridViewModel {
             }
 
             // Discard if another reload superseded us while we awaited.
-            guard myGeneration == generation else { return }
+            guard await SiloAPI.shared.isCurrentOwner(page.auth) else { throw HTTPError.requestIdentityChanged }
+            guard myGeneration == generation, !Task.isCancelled else { return }
 
             if startsOver || page.startsOver {
                 items = page.response.items
                 ResponseCache.shared.set(page.response, for: currentCacheKey, fetchedAt: writeToken)
                 if items.isEmpty {
-                    let probe = CatalogQueryBuilder.libraryProbe(libraryId: libraryId)
+                    var probe = CatalogQueryBuilder.libraryProbe(libraryId: libraryId)
+                    // A Movies/Series view of a mixed library is empty when that
+                    // type is, even if the other type has titles.
+                    probe.type = mediaScope?.rawValue
                     let reason = await BrowseEmptyReason.classify(filter: filter) {
                         try await !SiloAPI.shared.catalogPage(probe).response.items.isEmpty
                     }
@@ -292,7 +296,17 @@ final class TVLibraryGridViewModel {
             hasMore = page.continuation != nil
             refreshPosterPrefetch()
         } catch {
-            guard myGeneration == generation else { return }
+            guard myGeneration == generation, !Task.isCancelled else { return }
+            if case HTTPError.requestIdentityChanged = error {
+                items = []
+                continuation = nil
+                hasMore = true
+            }
+            if case HTTPError.authorityChanged = error {
+                items = []
+                continuation = nil
+                hasMore = true
+            }
             if items.isEmpty {
                 self.error = ErrorState(error)
             }
