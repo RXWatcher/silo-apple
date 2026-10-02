@@ -20,7 +20,7 @@ final class LibraryVideoScopeTests: XCTestCase {
     func testPagedEpisodePreservesPlaybackContext() throws {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
         let item = try decoder.decode(BrowseItem.self, from: Data("""
-        {"id":"episode","type":"episode","title":"Episode","series_id":"show","series_title":"Show",
+        {"content_id":"episode","type":"episode","title":"Episode","series_id":"show","series_title":"Show",
          "season_number":2,"episode_number":3,"position_seconds":73,"duration_seconds":1200,"item_source":"continue_watching"}
         """.utf8))
         let sectionItem = SectionItem(browseItem: item)
