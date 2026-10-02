@@ -64,6 +64,7 @@ enum LibraryVideoScope: String, Hashable {
         let originals = Dictionary(original.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var visible: [SectionItem] = []
         var seen = Set<String>()
+        var originalSnapshotIsValid = true
         var cursor: Cursor?
         for _ in 0..<8 {
             try Task.checkCancellation()
@@ -75,14 +76,20 @@ enum LibraryVideoScope: String, Hashable {
                 if error is CancellationError { throw error }
                 if case HTTPError.requestIdentityChanged = error { throw error }
                 if case HTTPError.authorityChanged = error { throw error }
-                // A failed shelf must not discard successful siblings or its inline cards.
-                for item in initial where seen.insert(item.id).inserted { visible.append(item) }
+                // Inline fallback belongs to the original window, never a restarted one.
+                if originalSnapshotIsValid {
+                    for item in initial where seen.insert(item.id).inserted { visible.append(item) }
+                }
                 return result(visible, incomplete: true)
             }
             // A restarted cursor is a new ordering; don't combine its cards with the old window.
-            if page.startsOver { visible.removeAll(); seen.removeAll() }
+            if page.startsOver {
+                visible.removeAll()
+                seen.removeAll()
+                originalSnapshotIsValid = false
+            }
             for item in page.items where contains(item.type) && seen.insert(item.id).inserted {
-                visible.append(originals[item.id] ?? item)
+                visible.append(originalSnapshotIsValid ? (originals[item.id] ?? item) : item)
             }
             if visible.count >= target || page.next == nil { return result(visible) }
             if page.items.isEmpty { return result(visible, incomplete: true) }

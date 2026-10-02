@@ -2,6 +2,26 @@ import XCTest
 @testable import Silo
 
 final class LibraryVideoScopeTests: XCTestCase {
+    func testRestartThenFailureDoesNotRestoreOldTitlesOrProgress() async throws {
+        let removed = try item("removed", "series")
+        let previous = try item("retained", "episode", progress: 10)
+        let current = try item("retained", "episode", progress: 90)
+        let film = try item("film", "movie")
+        var cursors: [Int?] = []
+        let result = try await LibraryVideoScope.series.refill(row(items: [removed, previous, film], total: 10)) { (cursor: Int?) in
+            cursors.append(cursor)
+            switch cursor {
+            case nil: return LibraryScopedPage(items: [removed], next: 1)
+            case 1: return LibraryScopedPage(items: [current], next: 2, startsOver: true)
+            default: throw URLError(.timedOut)
+            }
+        }
+        XCTAssertEqual(cursors, [nil, 1, 2])
+        XCTAssertTrue(result.incomplete)
+        XCTAssertEqual(result.section.items.map(\.id), ["retained"])
+        XCTAssertEqual(result.section.items.first?.positionSeconds, 90)
+    }
+
     func testFailedShelfRetainsInlineTitlesWithoutDiscardingSuccessfulShelves() async throws {
         let film = try item("film", "movie")
         let show = try item("show", "series")
