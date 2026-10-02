@@ -18,6 +18,36 @@ enum LibraryVideoScope: String, Hashable {
                         isCustom: original.isCustom, customized: original.customized, items: items)
     }
 
+    /// Overlap at most three shelves, preserving layout order and each shelf's cursor chain.
+    func refillSections<Cursor>(
+        _ originals: [ResolvedSection],
+        loadPage: @escaping @Sendable (ResolvedSection, Cursor?) async throws -> LibraryScopedPage<Cursor>
+    ) async throws -> [(section: ResolvedSection, incomplete: Bool)] {
+        let refillAt: @Sendable (Int) async throws -> (Int, ResolvedSection, Bool) = { index in
+            let result = try await refill(originals[index]) { cursor in
+                try await loadPage(originals[index], cursor)
+            }
+            return (index, result.section, result.incomplete)
+        }
+        return try await withThrowingTaskGroup(of: (Int, ResolvedSection, Bool).self) { group in
+            var nextIndex = min(3, originals.count)
+            for index in 0..<nextIndex {
+                group.addTask { try await refillAt(index) }
+            }
+            var results = originals.map { (section: $0, incomplete: false) }
+            while let (index, section, incomplete) = try await group.next() {
+                results[index] = (section, incomplete)
+                try Task.checkCancellation()
+                if nextIndex < originals.count {
+                    let index = nextIndex
+                    nextIndex += 1
+                    group.addTask { try await refillAt(index) }
+                }
+            }
+            return results
+        }
+    }
+
     /// Section queries reject type overlays. Preserve source order while filling a typed shelf.
     func refill<Cursor>(
         _ original: ResolvedSection,

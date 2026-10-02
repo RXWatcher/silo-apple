@@ -121,31 +121,24 @@ struct TVLibraryBrowseView: View {
         do {
             if let mediaScope {
                 let read = try await SiloAPI.shared.librarySections(libraryId: library.id)
-                var scoped: [ResolvedSection] = []
-                var incomplete = false
-                for row in read.response.sections {
+                let scoped = try await mediaScope.refillSections(read.response.sections) { [libraryID = library.id] (row: ResolvedSection, cursor: APIv2CatalogContinuation?) in
                     guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
-                    let result = try await mediaScope.refill(row) { (cursor: APIv2CatalogContinuation?) in
-                        guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
-                        let page: CatalogListPage
-                        if let cursor { page = try await SiloAPI.shared.nextCatalogPage(cursor) }
-                        else {
-                            var query = APIv2CatalogQuery()
-                            query.source = "section"; query.scope = "library"
-                            query.libraryId = String(library.id); query.sectionId = row.id; query.limit = 100
-                            page = try await SiloAPI.shared.catalogPage(query)
-                        }
-                        guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
-                        return LibraryScopedPage(items: page.response.items.map { SectionItem(browseItem: $0) },
-                                                 next: page.continuation, startsOver: page.startsOver)
+                    let page: CatalogListPage
+                    if let cursor { page = try await SiloAPI.shared.nextCatalogPage(cursor) }
+                    else {
+                        var query = APIv2CatalogQuery()
+                        query.source = "section"; query.scope = "library"
+                        query.libraryId = String(libraryID); query.sectionId = row.id; query.limit = 100
+                        page = try await SiloAPI.shared.catalogPage(query)
                     }
-                    scoped.append(result.section)
-                    incomplete = incomplete || result.incomplete
+                    guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
+                    return LibraryScopedPage(items: page.response.items.map { SectionItem(browseItem: $0) },
+                                             next: page.continuation, startsOver: page.startsOver)
                 }
                 guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
                 try Task.checkCancellation()
-                sections = scoped
-                scopeIncomplete = incomplete
+                sections = scoped.map(\.section)
+                scopeIncomplete = scoped.contains { $0.incomplete }
             } else {
                 let response = try await StartupContentPrefetcher.fetchLibrarySections(libraryId: library.id)
                 sections = response.sections

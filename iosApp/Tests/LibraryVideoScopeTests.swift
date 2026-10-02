@@ -2,6 +2,36 @@ import XCTest
 @testable import Silo
 
 final class LibraryVideoScopeTests: XCTestCase {
+    func testRefillsThreeShelvesAtATimeInLayoutAndCursorOrder() async throws {
+        let film = try item("film", "movie")
+        let show = try item("show", "series")
+        let started = expectation(description: "Three shelves begin before the first completes")
+        started.expectedFulfillmentCount = 3
+        let probe = ShelfRefillProbe(started: started, film: film, show: show)
+        let rows = (0..<6).map { index in
+            ResolvedSection(id: String(index), sectionType: "recently_added", title: "Shelf \(index)",
+                            featured: false, itemLimit: 1, totalCount: 2, isCustom: false,
+                            customized: false, items: [film])
+        }
+        let task = Task {
+            try await LibraryVideoScope.series.refillSections(rows) { row, cursor in
+                await probe.page(row.id, cursor: cursor)
+            }
+        }
+        await fulfillment(of: [started], timeout: 3)
+        let active = await probe.active
+        XCTAssertEqual(active, 3)
+        await probe.release()
+        let results = try await task.value
+        let peak = await probe.peak
+        let cursors = await probe.cursors
+        XCTAssertEqual(peak, 3)
+        XCTAssertEqual(results.map { $0.section.id }, rows.map(\.id))
+        XCTAssertEqual(results.flatMap { $0.section.items }.map(\.id), Array(repeating: "show", count: 6))
+        XCTAssertEqual(cursors.count, 6)
+        for values in cursors.values { XCTAssertEqual(values, [nil, 1]) }
+    }
+
     func testSectionPagingDoesNotSendFilterOverlays() throws {
         var query = APIv2CatalogQuery()
         query.source = "section"
@@ -106,5 +136,39 @@ final class LibraryVideoScopeTests: XCTestCase {
     private func row(items: [SectionItem], total: Int, limit: Int = 20) -> ResolvedSection {
         ResolvedSection(id: "recent", sectionType: "recently_added", title: "Recent", featured: false,
                         itemLimit: limit, totalCount: total, isCustom: false, customized: false, items: items)
+    }
+}
+
+private actor ShelfRefillProbe {
+    let started: XCTestExpectation
+    let film: SectionItem
+    let show: SectionItem
+    var active = 0
+    var peak = 0
+    var cursors: [String: [Int?]] = [:]
+    private var released = false
+    private var waiting: [CheckedContinuation<Void, Never>] = []
+
+    init(started: XCTestExpectation, film: SectionItem, show: SectionItem) {
+        self.started = started; self.film = film; self.show = show
+    }
+
+    func page(_ id: String, cursor: Int?) async -> LibraryScopedPage<Int> {
+        cursors[id, default: []].append(cursor)
+        active += 1; peak = max(peak, active)
+        if !released {
+            started.fulfill()
+            await withCheckedContinuation { waiting.append($0) }
+        }
+        await Task.yield()
+        active -= 1
+        return cursor == nil ? LibraryScopedPage(items: [film], next: 1)
+            : LibraryScopedPage(items: [show], next: nil)
+    }
+
+    func release() {
+        released = true
+        waiting.forEach { $0.resume() }
+        waiting.removeAll()
     }
 }
