@@ -787,7 +787,7 @@ struct LibraryCollectionDetailView: View {
 
     private func loadItems(reset: Bool) async {
         guard !isLoading else { return }
-        let cacheKey = CacheKey.catalogCollectionItems(collectionId) + (mediaScope.map { ".type-\($0.rawValue)" } ?? "")
+        let cacheKey = CacheKey.catalogCollectionItems(collectionId) + (mediaScope.map { ".library-\(libraryId).type-\($0.rawValue)" } ?? "")
         if reset {
             // Surface the cached first page instantly so the grid doesn't
             // blank out while the network call runs.

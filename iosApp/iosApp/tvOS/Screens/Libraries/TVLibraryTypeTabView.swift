@@ -48,7 +48,7 @@ struct TVLibraryTypeTabView: View {
                 }
                 // Re-create the tab body when the scoped library changes so
                 // section fetches and grid state reset cleanly.
-                .id(activeLibrary.id)
+                .id("\(activeLibrary.id)-\(mediaScope?.rawValue ?? "all")")
             } else {
                 EmptyStateView(
                     icon: "square.stack.3d.up",
