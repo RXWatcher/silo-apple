@@ -109,6 +109,12 @@ struct TVLibraryBrowseView: View {
     // MARK: - Data
 
     private func loadContent() async {
+        let scopedCacheKey = mediaScope.map { CacheKey.librarySections(library.id) + ".type-\($0.rawValue)" }
+        if sections.isEmpty, let scopedCacheKey,
+           let cached: (sections: [ResolvedSection], incomplete: Bool) = ResponseCache.shared.get(scopedCacheKey) {
+            sections = cached.sections
+            scopeIncomplete = cached.incomplete
+        }
         if sections.isEmpty,
            let cached: SectionsResponse = ResponseCache.shared.get(CacheKey.librarySections(library.id)) {
             sections = cached.sections.map { row in
@@ -120,8 +126,9 @@ struct TVLibraryBrowseView: View {
         sectionsError = nil
         do {
             if let mediaScope {
-                let read = try await SiloAPI.shared.librarySections(libraryId: library.id)
-                let scoped = try await mediaScope.refillSections(read.response.sections) { [libraryID = library.id] (row: ResolvedSection, cursor: APIv2CatalogContinuation?) in
+                let read = try await StartupContentPrefetcher.fetchLibrarySectionsRead(libraryId: library.id)
+                let visibleRows = read.response.sections.filter { !$0.isFeatured }
+                let scoped = try await mediaScope.refillSections(visibleRows) { [libraryID = library.id] (row: ResolvedSection, cursor: APIv2CatalogContinuation?) in
                     guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
                     let page: CatalogListPage
                     if let cursor { page = try await SiloAPI.shared.nextCatalogPage(cursor) }
@@ -139,6 +146,9 @@ struct TVLibraryBrowseView: View {
                 try Task.checkCancellation()
                 sections = scoped.map(\.section)
                 scopeIncomplete = scoped.contains { $0.incomplete }
+                if let scopedCacheKey {
+                    ResponseCache.shared.set((sections: sections, incomplete: scopeIncomplete), for: scopedCacheKey)
+                }
             } else {
                 let response = try await StartupContentPrefetcher.fetchLibrarySections(libraryId: library.id)
                 sections = response.sections
@@ -146,6 +156,7 @@ struct TVLibraryBrowseView: View {
         } catch {
             if error is CancellationError { return }
             if case HTTPError.requestIdentityChanged = error { sections = [] }
+            if case HTTPError.authorityChanged = error { sections = [] }
             sectionsError = ErrorState(error)
             scopeIncomplete = mediaScope != nil && !sections.isEmpty
         }

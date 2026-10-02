@@ -2,6 +2,46 @@ import XCTest
 @testable import Silo
 
 final class LibraryVideoScopeTests: XCTestCase {
+    func testFailedShelfRetainsInlineTitlesWithoutDiscardingSuccessfulShelves() async throws {
+        let film = try item("film", "movie")
+        let show = try item("show", "series")
+        let rows = [row(items: [film, show], total: 3, id: "failed"),
+                    row(items: [film], total: 2, id: "healthy")]
+        let results = try await LibraryVideoScope.series.refillSections(rows) { (row: ResolvedSection, _: Int?) -> LibraryScopedPage<Int> in
+            if row.id == "failed" { throw URLError(.timedOut) }
+            return LibraryScopedPage(items: [show], next: nil)
+        }
+        XCTAssertEqual(results.map { $0.section.id }, ["failed", "healthy"])
+        XCTAssertEqual(results.map(\.incomplete), [true, false])
+        XCTAssertEqual(results.map { $0.section.items.map(\.id) }, [["show"], ["show"]])
+    }
+
+    func testOwnerChangesAreNeverConvertedToPartialShelves() async throws {
+        let film = try item("film", "movie")
+        for ownerError in [HTTPError.requestIdentityChanged, HTTPError.authorityChanged] {
+            do {
+                _ = try await LibraryVideoScope.series.refill(row(items: [film], total: 2)) { (_: Int?) -> LibraryScopedPage<Int> in
+                    throw ownerError
+                }
+                XCTFail("Owner changes must abort the read")
+            } catch let error as HTTPError {
+                XCTAssertEqual(error.description, ownerError.description)
+            }
+        }
+    }
+
+    func testCancelledShelfDoesNotBecomePartialSuccess() async throws {
+        let film = try item("film", "movie")
+        do {
+            _ = try await LibraryVideoScope.series.refill(row(items: [film], total: 2)) { (_: Int?) -> LibraryScopedPage<Int> in
+                throw CancellationError()
+            }
+            XCTFail("Cancellation must propagate")
+        } catch {
+            XCTAssertTrue(error is CancellationError)
+        }
+    }
+
     func testRefillsThreeShelvesAtATimeInLayoutAndCursorOrder() async throws {
         let film = try item("film", "movie")
         let show = try item("show", "series")
@@ -133,8 +173,8 @@ final class LibraryVideoScopeTests: XCTestCase {
         """.utf8))
     }
 
-    private func row(items: [SectionItem], total: Int, limit: Int = 20) -> ResolvedSection {
-        ResolvedSection(id: "recent", sectionType: "recently_added", title: "Recent", featured: false,
+    private func row(items: [SectionItem], total: Int, limit: Int = 20, id: String = "recent") -> ResolvedSection {
+        ResolvedSection(id: id, sectionType: "recently_added", title: "Recent", featured: false,
                         itemLimit: limit, totalCount: total, isCustom: false, customized: false, items: items)
     }
 }

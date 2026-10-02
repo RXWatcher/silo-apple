@@ -67,7 +67,18 @@ enum LibraryVideoScope: String, Hashable {
         var cursor: Cursor?
         for _ in 0..<8 {
             try Task.checkCancellation()
-            let page = try await loadPage(cursor)
+            let page: LibraryScopedPage<Cursor>
+            do {
+                page = try await loadPage(cursor)
+            } catch {
+                try Task.checkCancellation()
+                if error is CancellationError { throw error }
+                if case HTTPError.requestIdentityChanged = error { throw error }
+                if case HTTPError.authorityChanged = error { throw error }
+                // A failed shelf must not discard successful siblings or its inline cards.
+                for item in initial where seen.insert(item.id).inserted { visible.append(item) }
+                return result(visible, incomplete: true)
+            }
             // A restarted cursor is a new ordering; don't combine its cards with the old window.
             if page.startsOver { visible.removeAll(); seen.removeAll() }
             for item in page.items where contains(item.type) && seen.insert(item.id).inserted {
