@@ -43,12 +43,15 @@ final class LibraryCollectionDetailViewModel {
               mediaScope: LibraryVideoScope?, reset: Bool) async {
         let requested = Selection(libraryId: libraryId, collectionId: collectionId,
                                   kind: kind, mediaScope: mediaScope)
-        let reset = reset || selection != requested
-        if reset {
+        let selectionChanged = selection != requested
+        let resetsPage = reset || selectionChanged
+        if resetsPage {
             // Supersede an in-flight page before checking its loading flag.
             generation += 1
             selection = requested
-            clearPage()
+            // Refreshing the same selection keeps every visible page if the
+            // network fails. A different selection cannot reuse those rows.
+            if selectionChanged { clearPage() }
         } else if isLoading || !hasMore {
             return
         }
@@ -66,7 +69,8 @@ final class LibraryCollectionDetailViewModel {
             guard requestGeneration == generation, !Task.isCancelled else { return }
             if let owner, !owner.sameCredentialIdentity(as: requestOwner) { clearPage() }
             owner = requestOwner
-            if reset, let cached: CachedPage = ResponseCache.shared.get(requested.cacheKey),
+            if resetsPage, items.isEmpty,
+               let cached: CachedPage = ResponseCache.shared.get(requested.cacheKey),
                cached.owner.sameCredentialIdentity(as: requestOwner) {
                 items = cached.response.items
                 totalItems = cached.response.totalExact == false ? nil : cached.response.total
@@ -74,7 +78,7 @@ final class LibraryCollectionDetailViewModel {
             }
 
             // Cached rows have no live cursor. Their next load starts at page one.
-            let nextPage = continuation
+            let nextPage = resetsPage ? nil : continuation
             let page: CatalogListPage
             if let nextPage {
                 page = try await api.nextCatalogPage(nextPage)

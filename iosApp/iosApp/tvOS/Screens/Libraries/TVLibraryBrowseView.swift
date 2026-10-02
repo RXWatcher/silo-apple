@@ -156,9 +156,10 @@ struct TVLibraryBrowseView: View {
                     ResponseCache.shared.set((sections: sections, incomplete: scopeIncomplete), for: scopedCacheKey)
                 }
             } else {
-                let response = try await StartupContentPrefetcher.fetchLibrarySections(libraryId: library.id)
+                let read = try await StartupContentPrefetcher.fetchLibrarySectionsRead(libraryId: library.id)
+                guard await SiloAPI.shared.isCurrentOwner(read.auth) else { throw HTTPError.requestIdentityChanged }
                 guard requestGeneration == loadGeneration, !Task.isCancelled else { return }
-                sections = response.sections
+                sections = read.response.sections
             }
         } catch {
             guard requestGeneration == loadGeneration, !Task.isCancelled else { return }

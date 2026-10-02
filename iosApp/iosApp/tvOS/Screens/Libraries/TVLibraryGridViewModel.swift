@@ -242,6 +242,7 @@ final class TVLibraryGridViewModel {
             }
 
             // Discard if another reload superseded us while we awaited.
+            guard await SiloAPI.shared.isCurrentOwner(page.auth) else { throw HTTPError.requestIdentityChanged }
             guard myGeneration == generation, !Task.isCancelled else { return }
 
             if startsOver || page.startsOver {
@@ -255,6 +256,16 @@ final class TVLibraryGridViewModel {
             refreshPosterPrefetch()
         } catch {
             guard myGeneration == generation, !Task.isCancelled else { return }
+            if case HTTPError.requestIdentityChanged = error {
+                items = []
+                continuation = nil
+                hasMore = true
+            }
+            if case HTTPError.authorityChanged = error {
+                items = []
+                continuation = nil
+                hasMore = true
+            }
             if items.isEmpty {
                 self.error = ErrorState(error)
             }

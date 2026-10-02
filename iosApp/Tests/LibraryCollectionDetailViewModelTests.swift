@@ -135,4 +135,26 @@ final class LibraryCollectionDetailViewModelTests: XCTestCase {
         await load(model, scope: .series)
         XCTAssertEqual(model.items.map(\.contentId), ["retry"])
     }
+
+    func testFailedRefreshKeepsEveryPreviouslyLoadedPage() async throws {
+        let handler = StubURLProtocol.Handler()
+        handler.expect(StubURLProtocol.any) { _ in
+            Self.page("first", type: "movie", cursor: "second-page")
+        }
+        handler.expect(StubURLProtocol.any) { _ in Self.page("second", type: "movie") }
+        handler.route(StubURLProtocol.any) { _ in throw URLError(.networkConnectionLost) }
+        let (api, tokens) = try await client(handler)
+        let model = LibraryCollectionDetailViewModel(api: api, tokens: tokens)
+        await load(model, scope: .movie)
+        await load(model, scope: .movie, reset: false)
+        XCTAssertEqual(model.items.map(\.contentId), ["first", "second"])
+
+        // Cache invalidation must not turn a failed refresh into an empty grid.
+        ResponseCache.shared.removeAll(withPrefix: CacheKey.catalogCollectionItems("mixed-review"))
+        await load(model, scope: .movie)
+        XCTAssertEqual(model.items.map(\.contentId), ["first", "second"])
+        XCTAssertFalse(model.isLoading)
+        XCTAssertFalse(model.hasMore)
+        XCTAssertEqual(handler.requests.count, 3)
+    }
 }
