@@ -220,8 +220,10 @@ final class TVLibraryGridViewModel {
             isLoading = true
         }
         defer {
-            isLoading = false
-            isRefreshing = false
+            if myGeneration == generation {
+                isLoading = false
+                isRefreshing = false
+            }
         }
 
         do {
@@ -240,7 +242,7 @@ final class TVLibraryGridViewModel {
             }
 
             // Discard if another reload superseded us while we awaited.
-            guard myGeneration == generation else { return }
+            guard myGeneration == generation, !Task.isCancelled else { return }
 
             if startsOver || page.startsOver {
                 items = page.response.items
@@ -252,7 +254,7 @@ final class TVLibraryGridViewModel {
             hasMore = page.continuation != nil
             refreshPosterPrefetch()
         } catch {
-            guard myGeneration == generation else { return }
+            guard myGeneration == generation, !Task.isCancelled else { return }
             if items.isEmpty {
                 self.error = ErrorState(error)
             }

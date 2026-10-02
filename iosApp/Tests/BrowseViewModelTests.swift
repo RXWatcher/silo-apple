@@ -16,8 +16,10 @@ final class BrowseViewModelTests: XCTestCase {
     }
 
     func testSwitchingScopeOnSameLibraryClearsOldItemsAndUsesScopedCache() async throws {
-        let film = try JSONDecoder().decode(BrowseItem.self, from: Data(#"{"content_id":"film","type":"movie","title":"Film"}"#.utf8))
-        let show = try JSONDecoder().decode(BrowseItem.self, from: Data(#"{"content_id":"show","type":"series","title":"Show"}"#.utf8))
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        let film = try decoder.decode(BrowseItem.self, from: Data(#"{"content_id":"film","type":"movie","title":"Film"}"#.utf8))
+        let show = try decoder.decode(BrowseItem.self, from: Data(#"{"content_id":"show","type":"series","title":"Show"}"#.utf8))
         let movieKey = CacheKey.browse(libraryId: 809, filterKey: CatalogFilterState.none.cacheKeyFragment, mediaScope: "movie")
         let seriesKey = CacheKey.browse(libraryId: 809, filterKey: CatalogFilterState.none.cacheKeyFragment, mediaScope: "series")
         let combinedKey = CacheKey.browse(libraryId: 809, filterKey: CatalogFilterState.none.cacheKeyFragment)
