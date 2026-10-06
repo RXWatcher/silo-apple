@@ -55,20 +55,11 @@ enum HomeFeed {
 // MARK: - Metadata formatting
 
 enum HomeFeedMeta {
-    static func runtime(minutes: Int?) -> String? {
-        guard let minutes, minutes > 0 else { return nil }
-        let hours = minutes / 60
-        let remainder = minutes % 60
-        if hours > 0, remainder > 0 { return "\(hours)h \(remainder)m" }
-        if hours > 0 { return "\(hours)h" }
-        return "\(remainder)m"
-    }
-
     static func remaining(position: Double?, duration: Double?) -> String? {
         guard let position, let duration, duration > 0, position > 0 else { return nil }
         let minutesLeft = Int((duration - position) / 60)
         guard minutesLeft > 0 else { return nil }
-        return runtime(minutes: minutesLeft).map { "\($0) left" }
+        return MediaTextFormatting.runtime(minutes: minutesLeft).map { "\($0) left" }
     }
 
     static func progress(for item: SectionItem) -> Double? {
@@ -115,8 +106,7 @@ enum HomeFeedMeta {
 
 // MARK: - Navigation
 
-/// Shared tap handling so every variant card pushes detail the same way,
-/// including the iOS 26 zoom transition the shipping `MediaCard` uses.
+/// Shared tap handling so every variant card opens detail the same way.
 private struct HomeCardTap<Label: View>: View {
     let contentId: String
     let accessibilityLabel: String
@@ -132,13 +122,10 @@ private struct HomeCardTap<Label: View>: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.browseLibraryId) private var browseLibraryId
     @Environment(\.itemDetailBrowseSource) private var detailBrowseSource
-    @Environment(\.zoomNamespace) private var zoomNamespace
-    @State private var zoomInstanceID = UUID()
 
     var body: some View {
         Button {
             if let onTap { onTap(); return }
-            router.pendingZoomSourceID = zoomInstanceID.uuidString
             if let continueWatchingItem {
                 router.presentContinueWatchingDetail(for: continueWatchingItem, libraryId: browseLibraryId, browseSource: detailBrowseSource)
             } else {
@@ -147,7 +134,6 @@ private struct HomeCardTap<Label: View>: View {
             }
         } label: {
             label()
-                .zoomTransitionSource(id: zoomInstanceID.uuidString, in: zoomNamespace)
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .ignore)
@@ -185,14 +171,11 @@ private struct HomeCardMenu: ViewModifier {
     /// Owned by the card, not the menu, so the artwork's watched check flips
     /// with the menu label instead of waiting on the Home refresh —
     /// `MediaCard` drives its badge from the same effective state.
-    @Binding var playedOverride: Bool?
-    @State private var actionFeedback = MediaActionFeedback()
-    @State private var favoriteOverride: Bool?
-    @State private var watchlistOverride: Bool?
+    let personalState: MediaCardPersonalState
 
-    private var isPlayed: Bool { playedOverride ?? (item.userState?.played == true) }
-    private var isFavorite: Bool { favoriteOverride ?? (item.userState?.isFavorite == true) }
-    private var inWatchlist: Bool { watchlistOverride ?? (item.userState?.inWatchlist == true) }
+    private var isPlayed: Bool { personalState.isPlayed(item.userState) }
+    private var isFavorite: Bool { personalState.isFavorite(item.userState) }
+    private var inWatchlist: Bool { personalState.inWatchlist(item.userState) }
 
     /// Only cards backed by server user state get the personal-list entries,
     /// matching `MediaCard`.
@@ -206,11 +189,9 @@ private struct HomeCardMenu: ViewModifier {
         if hasAnyAction {
             content
                 .contextMenu { menuItems }
-                .mediaActionFeedback(actionFeedback)
+                .mediaActionFeedback(personalState.feedback)
                 .onChange(of: item.userState) { _, _ in
-                    playedOverride = nil
-                    favoriteOverride = nil
-                    watchlistOverride = nil
+                    personalState.reset()
                 }
         } else {
             content
@@ -223,7 +204,7 @@ private struct HomeCardMenu: ViewModifier {
             isWatched: isPlayed,
             isFavorite: isFavorite,
             inWatchlist: inWatchlist,
-            isUpdating: actionFeedback.isUpdating,
+            isUpdating: personalState.feedback.isUpdating,
             onToggleWatched: canSetWatched ? toggleWatched : nil,
             onToggleFavorite: hasPersonalActions ? toggleFavorite : nil,
             onToggleWatchlist: hasPersonalActions ? toggleWatchlist : nil
@@ -241,49 +222,17 @@ private struct HomeCardMenu: ViewModifier {
     }
 
     private func toggleWatched() {
-        let played = !isPlayed
-        let previous = playedOverride
-        actionFeedback.perform(reportsFailure: onSetWatched == nil) {
-            playedOverride = played
-            let outcome: PersonalStateOutcome
-            if let onSetWatched {
-                outcome = await onSetWatched(played) ? .applied : .failed(nil)
-            } else {
-                outcome = await MediaCardWatchedSync.setWatched(
-                    contentId: item.contentId, played: played, seriesId: item.seriesId
-                )
-            }
-            if outcome != .applied { playedOverride = previous }
-            return outcome
-        }
+        let write: MediaCardPersonalState.WatchedWrite = onSetWatched.map { .host($0) }
+            ?? .catalog(contentId: item.contentId, seriesId: item.seriesId)
+        personalState.toggleWatched(from: item.userState, via: write)
     }
 
     private func toggleFavorite() {
-        let newValue = !isFavorite
-        let watchlist = inWatchlist
-        let previous = favoriteOverride
-        actionFeedback.perform {
-            favoriteOverride = newValue
-            let outcome = await PersonalListSync.setFavorite(
-                contentId: item.contentId, isFavorite: newValue, inWatchlist: watchlist
-            )
-            if outcome != .applied { favoriteOverride = previous }
-            return outcome
-        }
+        personalState.toggleFavorite(contentId: item.contentId, from: item.userState)
     }
 
     private func toggleWatchlist() {
-        let newValue = !inWatchlist
-        let favorite = isFavorite
-        let previous = watchlistOverride
-        actionFeedback.perform {
-            watchlistOverride = newValue
-            let outcome = await PersonalListSync.setWatchlist(
-                contentId: item.contentId, isFavorite: favorite, inWatchlist: newValue
-            )
-            if outcome != .applied { watchlistOverride = previous }
-            return outcome
-        }
+        personalState.toggleWatchlist(contentId: item.contentId, from: item.userState)
     }
 }
 
@@ -328,16 +277,19 @@ struct HomePosterCard: View {
     var secondLineOverride: String? = nil
 
     @EnvironmentObject private var overlayStore: OverlayPrefsStore
-    /// Optimistic watched state, shared with the menu so the badge flips the
+    /// Optimistic personal state, shared with the menu so the badge flips the
     /// moment "Mark as Watched" is tapped rather than after the Home refresh.
-    @State private var playedOverride: Bool?
+    @State private var personalState = MediaCardPersonalState()
 
-    private var isPlayed: Bool { playedOverride ?? (item.userState?.played == true) }
+    private var isPlayed: Bool { personalState.isPlayed(item.userState) }
 
-    private var height: CGFloat {
+    private var height: CGFloat { Self.artworkSize(width: width, aspect: aspect).height }
+
+    /// The size a poster card of `width` draws its artwork at.
+    static func artworkSize(width: CGFloat, aspect: MediaCardAspect) -> CGSize {
         switch aspect {
-        case .poster: (width * HomeFeedMetrics.posterAspect).rounded()
-        case .square: width
+        case .poster: CGSize(width: width, height: (width * HomeFeedMetrics.posterAspect).rounded())
+        case .square: CGSize(width: width, height: width)
         }
     }
 
@@ -358,7 +310,7 @@ struct HomePosterCard: View {
             item: item,
             onRemoveFromContinueWatching: onRemoveFromContinueWatching,
             onSetWatched: onSetWatched,
-            playedOverride: $playedOverride
+            personalState: personalState
         ))
     }
 
@@ -367,7 +319,8 @@ struct HomePosterCard: View {
             url: item.posterUrl ?? "",
             thumbhash: item.posterThumbhash,
             targetSize: CGSize(width: width, height: height),
-            contentMode: .fill
+            contentMode: .fill,
+            placeholderSymbol: ArtworkPlaceholderSymbol.forMediaType(item.type)
         )
         .frame(width: width, height: height)
         .clipped()
@@ -470,26 +423,33 @@ struct HomeStillCard: View {
     /// Replaces opening detail and drops the direct-play action; see `HomeCardTap.onTap`.
     var onTap: (() -> Void)? = nil
 
-    /// Optimistic watched state, shared with the menu — see `HomePosterCard`.
-    @State private var playedOverride: Bool?
+    /// Optimistic personal state, shared with the menu — see `HomePosterCard`.
+    @State private var personalState = MediaCardPersonalState()
     @EnvironmentObject private var overlayStore: OverlayPrefsStore
     @Environment(\.browseLibraryId) private var playbackLibraryId
     @Environment(AppRouter.self) private var router
 
-    private var isPlayed: Bool { playedOverride ?? (item.userState?.played == true) }
+    private var isPlayed: Bool { personalState.isPlayed(item.userState) }
 
-    private var height: CGFloat { (width * 9.0 / 16.0).rounded() }
+    private var height: CGFloat { Self.artworkSize(width: width).height }
+
+    /// The size a still card of `width` draws its artwork at.
+    static func artworkSize(width: CGFloat) -> CGSize {
+        CGSize(width: width, height: (width * 9.0 / 16.0).rounded())
+    }
 
     /// Backdrop when the payload actually has one — some send `""` rather
     /// than omitting the field — otherwise the poster, with the thumbhash
     /// kept in lockstep so the blur placeholder previews the image that
     /// will actually load.
-    private var art: (url: String, thumbhash: String?) {
+    static func art(for item: SectionItem) -> (url: String, thumbhash: String?) {
         if let backdrop = item.backdropUrl, !backdrop.isEmpty {
             return (backdrop, item.backdropThumbhash)
         }
         return (item.posterUrl ?? "", item.posterThumbhash)
     }
+
+    private var art: (url: String, thumbhash: String?) { Self.art(for: item) }
 
     var body: some View {
         HomeCardTap(
@@ -511,7 +471,7 @@ struct HomeStillCard: View {
             item: item,
             onRemoveFromContinueWatching: onRemoveFromContinueWatching,
             onSetWatched: onSetWatched,
-            playedOverride: $playedOverride
+            personalState: personalState
         ))
     }
 
@@ -521,7 +481,8 @@ struct HomeStillCard: View {
                 url: art.url,
                 thumbhash: art.thumbhash,
                 targetSize: CGSize(width: width, height: height),
-                contentMode: .fill
+                contentMode: .fill,
+                placeholderSymbol: ArtworkPlaceholderSymbol.forMediaType(item.type)
             )
             .frame(width: width, height: height)
             .clipped()
@@ -678,28 +639,12 @@ struct HomeStillCard: View {
 // MARK: - Section header
 
 /// Section header. Tighter and quieter than the shipping one: negative
-/// tracking at this size stops the label sprawling, and the count/chevron
-/// pair replaces the text "See All" button.
+/// tracking at this size stops the label sprawling.
 struct HomeSectionHeader: View {
     let title: String
     var icon: String? = nil
-    var style: Style = .standard
-    var onSeeAll: (() -> Void)? = nil
-
-    enum Style {
-        case standard
-        /// Small uppercase label over a hairline rule — Poster Wall.
-        case rule
-    }
 
     var body: some View {
-        switch style {
-        case .standard: standardHeader
-        case .rule: ruleHeader
-        }
-    }
-
-    private var standardHeader: some View {
         HStack(spacing: 7) {
             if let icon {
                 Image(systemName: icon)
@@ -708,49 +653,12 @@ struct HomeSectionHeader: View {
             }
 
             Text(title)
-                .font(.headline)
+                .font(.siloHeadline)
                 .tracking(-0.3)
                 .foregroundStyle(Color.siloOnSurface)
                 .lineLimit(1)
 
             Spacer(minLength: 8)
-
-            if let onSeeAll {
-                Button(action: onSeeAll) {
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(Color.siloOnSurface.opacity(0.35))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, HomeFeedMetrics.gutter)
-    }
-
-    private var ruleHeader: some View {
-        VStack(spacing: 8) {
-            HStack(spacing: 8) {
-                Text(title.uppercased())
-                    .font(.caption2.weight(.heavy))
-                    .tracking(1.4)
-                    .foregroundStyle(Color.siloOnSurface.opacity(0.72))
-                    .lineLimit(1)
-
-                Spacer(minLength: 8)
-
-                if let onSeeAll {
-                    Button(action: onSeeAll) {
-                        Image(systemName: "arrow.right")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Color.siloOnSurface.opacity(0.35))
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-
-            Rectangle()
-                .fill(Color.white.opacity(0.10))
-                .frame(height: 0.5)
         }
         .padding(.horizontal, HomeFeedMetrics.gutter)
     }

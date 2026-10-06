@@ -8,24 +8,41 @@ import SwiftUI
 /// On tvOS this view delegates to ``TVSettingsView``, a root-menu Form
 /// with drill-in sub-screens tuned for the 10-foot experience.
 struct SettingsView: View {
+    #if os(tvOS)
+    var body: some View {
+        TVSettingsView()
+    }
+    #else
     @State private var viewModel = SettingsViewModel()
     @State private var uiCustomization = UICustomizationPreferences.shared
-    @State private var launchPreferences = ProfileLaunchPreferences.shared
     @Environment(AppRouter.self) private var router
     @State private var showSignOutConfirm = false
     #if os(iOS)
     @State private var diagnosticsModel = DiagnosticsViewModel()
     #endif
+    #if os(macOS)
+    @State private var launchPreferences = ProfileLaunchPreferences.shared
+    @State private var accountSignIn = AccountSignInModel.live()
+    #endif
 
     var body: some View {
-        #if os(tvOS)
-        TVSettingsView()
-        #elseif os(iOS)
-        iOSOverview
-        #else
-        macOSBody
-        #endif
+        Group {
+            #if os(iOS)
+            iOSOverview
+            #else
+            macOSBody
+            #endif
+        }
+        .alert("Sign Out", isPresented: $showSignOutConfirm) {
+            Button("Sign Out", role: .destructive) {
+                router.signOutAndReset()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Are you sure you want to sign out?")
+        }
     }
+    #endif
 
     #if os(iOS)
     private var iOSOverview: some View {
@@ -39,14 +56,6 @@ struct SettingsView: View {
             await viewModel.loadSettings()
             await diagnosticsModel.load(profile: viewModel.activeProfile)
         }
-        .alert("Sign Out", isPresented: $showSignOutConfirm) {
-            Button("Sign Out", role: .destructive) {
-                router.signOutAndReset()
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to sign out?")
-        }
     }
     #endif
 
@@ -54,25 +63,42 @@ struct SettingsView: View {
     private var macOSBody: some View {
         List {
             accountSection
+            if accountSignIn.showsEntry {
+                accountSignInSection
+            }
             preferencesSection
             connectionSection
             aboutSection
             signOutSection
         }
+        #if os(macOS)
+        .settingsListChrome()
+        #else
         .siloGroupedListStyle()
+        #endif
         .navigationTitle("Settings")
         .siloNavigationTitleDisplayMode(.large)
         .siloToolbarColorSchemeDark()
         .task {
             await viewModel.loadSettings()
         }
-        .alert("Sign Out", isPresented: $showSignOutConfirm) {
-            Button("Sign Out", role: .destructive) {
-                router.signOutAndReset()
+        .task { await accountSignIn.load() }
+    }
+
+    // MARK: - Sign-in
+
+    private var accountSignInSection: some View {
+        Section {
+            NavigationLink {
+                AccountSignInView(model: accountSignIn)
+            } label: {
+                SettingsRowLabel(
+                    title: "Sign-in",
+                    systemImage: "person.badge.key.fill",
+                    color: .blue,
+                    value: accountSignIn.identities.first?.providerName
+                )
             }
-            Button("Cancel", role: .cancel) {}
-        } message: {
-            Text("Are you sure you want to sign out?")
         }
     }
 
@@ -92,12 +118,12 @@ struct SettingsView: View {
                     )
 
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(displayName)
+                        Text(viewModel.displayName)
                             .font(.title3.weight(.semibold))
                             .foregroundStyle(Color.siloOnSurface)
                             .lineLimit(1)
 
-                        Text(subtitleLine)
+                        Text(viewModel.accountSubtitleLine)
                             .font(.footnote)
                             .foregroundStyle(Color.siloSecondaryText)
                             .lineLimit(1)
@@ -122,38 +148,6 @@ struct SettingsView: View {
 
     private func switchProfile() {
         router.switchProfile()
-    }
-
-    private var displayName: String {
-        if let name = viewModel.activeProfile?.name, !name.isEmpty {
-            return name
-        }
-        if let username = viewModel.userInfo?.username, !username.isEmpty {
-            return username
-        }
-        return "Switch Profile"
-    }
-
-    private var subtitleLine: String {
-        let host = serverHost
-        let username = viewModel.userInfo?.username
-        switch (username, host) {
-        case let (user?, host?) where !user.isEmpty && user != displayName:
-            return "\(user) · \(host)"
-        case let (_, host?):
-            return host
-        case let (user?, _) where !user.isEmpty && user != displayName:
-            return user
-        default:
-            return "Tap to switch profile"
-        }
-    }
-
-    private var serverHost: String? {
-        guard let url = URL(string: viewModel.serverUrl), let host = url.host else {
-            return viewModel.serverUrl.isEmpty ? nil : viewModel.serverUrl
-        }
-        return host
     }
 
     // MARK: - Preferences
@@ -200,7 +194,7 @@ struct SettingsView: View {
                     title: "Subtitles",
                     systemImage: "captions.bubble.fill",
                     color: .pink,
-                    value: subtitleLanguageName(viewModel.prefs.subtitleLanguage)
+                    value: viewModel.subtitleLanguageName
                 )
             }
 
@@ -216,11 +210,6 @@ struct SettingsView: View {
                 }
             }
         }
-    }
-
-    private func subtitleLanguageName(_ tag: String) -> String {
-        if tag == PlaybackPrefSentinel.none || tag.isEmpty { return "None" }
-        return PlaybackLanguageOption.label(forCode: tag)
     }
 
     // MARK: - Connection
@@ -250,7 +239,7 @@ struct SettingsView: View {
     private var aboutSection: some View {
         Section("About") {
             LabeledContent {
-                Text(versionString)
+                Text(SettingsViewModel.versionString)
                     .foregroundStyle(Color.siloSecondaryText)
             } label: {
                 Text("Version")
@@ -260,23 +249,17 @@ struct SettingsView: View {
             Link("Privacy Policy", destination: SiloLegalLinks.privacyPolicy)
 
             NavigationLink {
-                OpenSourceAcknowledgementsView()
+                AcknowledgementsView()
             } label: {
                 SettingsRowLabel(
-                    title: "Open Source Licenses",
+                    title: "Acknowledgements",
                     systemImage: "curlybraces",
                     color: .indigo
                 )
             }
-        }
-    }
 
-    private var versionString: String {
-        let short = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
-        if let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String, build != short {
-            return "\(short) (\(build))"
+            Link("Source Code", destination: SiloLegalLinks.sourceCode)
         }
-        return short
     }
 
     // MARK: - Sign Out
