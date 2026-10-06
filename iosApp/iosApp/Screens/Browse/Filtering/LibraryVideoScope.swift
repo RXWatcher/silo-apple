@@ -58,9 +58,15 @@ enum LibraryVideoScope: String, Hashable {
         func result(_ items: [SectionItem], incomplete: Bool = false) -> (ResolvedSection, Bool) {
             (section(original, items: Array(items.prefix(target))), incomplete)
         }
-        if initial.count >= target || (original.totalCount ?? Int.max) <= original.items.count {
-            return result(initial)
-        }
+        // Only a full scoped slice skips the refill. The inline `total_count`
+        // is not an exhaustion signal: bounded shelves such as Recently Added
+        // report `len(items)` after their LIMIT, so 20 inline movies can hide
+        // older series that the section source still pages.
+        if initial.count >= target { return result(initial) }
+        // A profile override (or a profile-added row) can change what the row
+        // shows, but the section catalog source pages the admin definition.
+        // Keep the row's own scoped items rather than publish another row's.
+        if original.customized == true || original.isCustom == true { return result(initial) }
         let originals = Dictionary(original.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var visible: [SectionItem] = []
         var seen = Set<String>()
@@ -91,8 +97,9 @@ enum LibraryVideoScope: String, Hashable {
             for item in page.items where contains(item.type) && seen.insert(item.id).inserted {
                 visible.append(originalSnapshotIsValid ? (originals[item.id] ?? item) : item)
             }
+            // Only the server's missing continuation proves the shelf is
+            // exhausted; an empty or fully filtered page with a cursor is not.
             if visible.count >= target || page.next == nil { return result(visible) }
-            if page.items.isEmpty { return result(visible, incomplete: true) }
             cursor = page.next
         }
         return result(visible, incomplete: true)

@@ -155,15 +155,66 @@ final class LibraryVideoScopeTests: XCTestCase {
         XCTAssertNil(result.section.totalCount, "The unfiltered total must not be shown as a typed count")
     }
 
-    func testCompleteInlineShelfKeepsEpisodeProgressWithoutRefetch() async throws {
+    /// Recently Added / Recently Released report `total_count = len(items)`
+    /// after their LIMIT, so a full inline slice of movies says nothing about
+    /// older series. The shelf must still page the section source.
+    func testInlineTotalEqualToSliceIsNotTreatedAsExhausted() async throws {
         let episode = try item("episode", "episode", progress: 73)
         let film = try item("film", "movie")
-        let result = try await LibraryVideoScope.series.refill(row(items: [film, episode], total: 2)) { (_: Int?) -> LibraryScopedPage<Int> in
-            XCTFail("A complete inline shelf should not be fetched again")
+        let pagedEpisode = try item("episode", "episode")
+        let olderShow = try item("older", "series")
+        var cursors: [Int?] = []
+        let result = try await LibraryVideoScope.series.refill(row(items: [film, episode], total: 2)) { (cursor: Int?) in
+            cursors.append(cursor)
+            return LibraryScopedPage(items: [film, pagedEpisode, olderShow], next: nil)
+        }
+        XCTAssertEqual(cursors, [nil])
+        XCTAssertEqual(result.section.items.map(\.id), ["episode", "older"])
+        XCTAssertEqual(result.section.items.first?.positionSeconds, 73, "The inline row's progress wins over the paged copy")
+        XCTAssertFalse(result.incomplete)
+    }
+
+    func testFullScopedInlineSliceIsNotFetchedAgain() async throws {
+        let shows = try (0..<2).map { try item("show\($0)", "series") }
+        let result = try await LibraryVideoScope.series.refill(row(items: shows, total: 50, limit: 2)) { (_: Int?) -> LibraryScopedPage<Int> in
+            XCTFail("A scoped slice that already fills the shelf needs no refill")
             return LibraryScopedPage(items: [], next: nil)
         }
-        XCTAssertEqual(result.section.items.map(\.id), ["episode"])
-        XCTAssertEqual(result.section.items.first?.positionSeconds, 73)
+        XCTAssertEqual(result.section.items.map(\.id), ["show0", "show1"])
+        XCTAssertFalse(result.incomplete)
+    }
+
+    /// The section catalog source pages the admin definition, not a profile
+    /// override, so a customized or profile-added row keeps its own items.
+    func testProfileCustomizedShelvesAreNotRefilledFromTheAdminDefinition() async throws {
+        let film = try item("film", "movie")
+        let show = try item("show", "series")
+        for (customized, isCustom) in [(true, false), (false, true)] {
+            let original = ResolvedSection(id: "random", sectionType: "random", title: "Random", featured: false,
+                                           itemLimit: 20, totalCount: 21, isCustom: isCustom,
+                                           customized: customized, items: [film, show])
+            let result = try await LibraryVideoScope.series.refill(original) { (_: Int?) -> LibraryScopedPage<Int> in
+                XCTFail("A profile-customized row must not be refilled from the admin definition")
+                return LibraryScopedPage(items: [], next: nil)
+            }
+            XCTAssertEqual(result.section.items.map(\.id), ["show"])
+            XCTAssertFalse(result.incomplete)
+        }
+    }
+
+    func testEmptyPageWithContinuationKeepsPaging() async throws {
+        let film = try item("film", "movie")
+        let show = try item("show", "series")
+        var cursors: [Int?] = []
+        let result = try await LibraryVideoScope.series.refill(row(items: [film], total: 1)) { (cursor: Int?) in
+            cursors.append(cursor)
+            switch cursor {
+            case nil: return LibraryScopedPage(items: [], next: 1)
+            default: return LibraryScopedPage(items: [show], next: nil)
+            }
+        }
+        XCTAssertEqual(cursors, [nil, 1])
+        XCTAssertEqual(result.section.items.map(\.id), ["show"])
         XCTAssertFalse(result.incomplete)
     }
 
@@ -185,6 +236,21 @@ final class LibraryVideoScopeTests: XCTestCase {
         XCTAssertFalse(LibraryVideoScope.movie.contains("episode"))
         XCTAssertFalse(LibraryVideoScope.series.contains("audiobook"))
     }
+
+    #if os(tvOS)
+    func testOnlyAnExplicitVideoTabNarrowsAMixedLibrary() {
+        let mixed = Library(id: 1, name: "Everything", type: "mixed", sortOrder: nil)
+        let movies = Library(id: 2, name: "Films", type: "movie", sortOrder: nil)
+        XCTAssertTrue(mixed.isMixedLibrary)
+        XCTAssertEqual(TVLibraryTypeTabView.mediaScope(for: .movies, library: mixed, scopesMixedLibraries: true), .movie)
+        XCTAssertEqual(TVLibraryTypeTabView.mediaScope(for: .series, library: mixed, scopesMixedLibraries: true), .series)
+        // A pinned shortcut resolves its pill vocabulary from the first
+        // matching tab type (.movies for a mixed library); it must not hide series.
+        XCTAssertNil(TVLibraryTypeTabView.mediaScope(for: .movies, library: mixed, scopesMixedLibraries: false))
+        XCTAssertNil(TVLibraryTypeTabView.mediaScope(for: .movies, library: movies, scopesMixedLibraries: true))
+        XCTAssertNil(TVLibraryTypeTabView.mediaScope(for: .movies, library: nil, scopesMixedLibraries: true))
+    }
+    #endif
 
     private func item(_ id: String, _ type: String, progress: Int = 0) throws -> SectionItem {
         let decoder = JSONDecoder(); decoder.keyDecodingStrategy = .convertFromSnakeCase
