@@ -517,8 +517,12 @@ struct LibraryCollectionsView: View {
     @State private var uiCustomization = UICustomizationPreferences.shared
     @State private var gridWidth: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.verticalSizeClass) private var vSize
 
     private var columns: [GridItem] {
+        if let fit = widePhonePosterFit {
+            return fit.columns
+        }
         if usesThreeColumnPhoneLayout {
             return Array(
                 repeating: GridItem(.flexible(), spacing: 12),
@@ -613,7 +617,19 @@ struct LibraryCollectionsView: View {
         #endif
     }
 
+    /// A phone window too wide for three-up cards (the iPhone Duo's inner
+    /// display) fills the row with more columns.
+    private var widePhonePosterFit: AdaptiveColumns.PosterGridFit? {
+        guard usesThreeColumnPhoneLayout else { return nil }
+        return AdaptiveColumns.widePhonePosterFit(
+            containerWidth: gridWidth,
+            posterSize: uiCustomization.cardPresentation.posterSize,
+            verticalSizeClass: vSize
+        )
+    }
+
     private var libraryCollectionCardWidthOverride: CGFloat? {
+        if let fit = widePhonePosterFit { return fit.cardWidth }
         guard usesThreeColumnPhoneLayout else { return nil }
         return AdaptiveColumns.fittedPosterWidth(
             containerWidth: gridWidth,

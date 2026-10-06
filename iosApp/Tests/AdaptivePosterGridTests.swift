@@ -46,6 +46,47 @@ final class AdaptivePosterGridTests: XCTestCase {
         XCTAssertNil(fit(0))
     }
 
+    /// Every iPhone keeps its three-up grid in portrait, the only orientation
+    /// phone browsing allows: SE, 17 Pro Max, and the iPhone Duo's outer
+    /// display, each less 16pt side padding.
+    func testPhoneWidthsKeepThreeUpGrid() {
+        for screenWidth: CGFloat in [375, 440, 466] {
+            XCTAssertNil(
+                AdaptiveColumns.widePhonePosterFit(
+                    containerWidth: screenWidth - 32, posterSize: .standard, verticalSizeClass: .regular
+                ),
+                "width \(screenWidth)"
+            )
+        }
+    }
+
+    /// An iPhone turned to landscape for the player rotates the grids beneath
+    /// it too. Wide but compact height, they keep three-up.
+    func testLandscapeIPhoneGridKeepsThreeUp() {
+        XCTAssertNil(AdaptiveColumns.widePhonePosterFit(
+            containerWidth: 956 - 124 - 32, posterSize: .standard, verticalSizeClass: .compact
+        ))
+    }
+
+    /// The iPhone Duo's inner display is a phone idiom but iPad-sized. It
+    /// fills the row with phone-size posters instead of three small posters
+    /// and wide gaps. Widths are the measured grid: open portrait (669pt) and
+    /// landscape beside the vertical tab bar, each less side padding.
+    func testDuoInnerDisplayFillsRowWithPhoneSizePosters() throws {
+        let portrait = try XCTUnwrap(
+            AdaptiveColumns.widePhonePosterFit(containerWidth: 637, posterSize: .standard, verticalSizeClass: .regular)
+        )
+        XCTAssertEqual(portrait.columnCount, 5)
+        let landscape = try XCTUnwrap(
+            AdaptiveColumns.widePhonePosterFit(containerWidth: 835, posterSize: .standard, verticalSizeClass: .regular)
+        )
+        XCTAssertEqual(landscape.columnCount, 6)
+        for fit in [portrait, landscape] {
+            XCTAssertGreaterThanOrEqual(fit.cardWidth, AdaptiveColumns.widePhoneMinimumPosterWidth)
+            XCTAssertLessThan(fit.cardWidth, SiloTheme.posterCardWidth + 10)
+        }
+    }
+
     /// Split View and Stage Manager can size the window to any width. Cards
     /// always fill the row exactly and stay between the minimum and twice it.
     func testEveryWidthFillsTheRowWithoutGaps() throws {
@@ -74,6 +115,35 @@ final class AdaptivePosterGridTests: XCTestCase {
         XCTAssertTrue(PhoneDetailHeroLayout.usesExpandedLayout(
             availableWidth: 0, horizontalSizeClass: .regular, verticalSizeClass: .regular
         ))
+    }
+
+    /// A detail page splits into hero and content panes only where a single
+    /// hero-first column would show little more than artwork: the iPhone
+    /// Duo's open display in landscape, full-panel or in its compatibility
+    /// window. Portrait pages, iPhones, and iPad page sheets keep one column.
+    func testDetailPageSplitsOnlyWhenWideAndShort() {
+        let split: [CGSize] = [CGSize(width: 951, height: 669), CGSize(width: 830, height: 669)]
+        let column: [CGSize] = [
+            CGSize(width: 669, height: 951),
+            CGSize(width: 440, height: 956),
+            CGSize(width: 834, height: 1_150),
+            CGSize(width: 1_024, height: 980),
+            .zero,
+        ]
+        for size in split {
+            XCTAssertTrue(PhoneDetailHeroLayout.usesSplitLayout(pageSize: size, verticalSizeClass: .regular), "\(size)")
+        }
+        for size in column {
+            XCTAssertFalse(PhoneDetailHeroLayout.usesSplitLayout(pageSize: size, verticalSizeClass: .regular), "\(size)")
+        }
+    }
+
+    /// An iPhone turned to landscape for the player rotates the detail page
+    /// beneath it. That page is wide and short but compact height, and keeps
+    /// its single column (and scroll position) rather than splitting.
+    func testLandscapeIPhoneUnderThePlayerKeepsOneColumn() {
+        let proMaxLandscape = CGSize(width: 956 - 124, height: 440)
+        XCTAssertFalse(PhoneDetailHeroLayout.usesSplitLayout(pageSize: proMaxLandscape, verticalSizeClass: .compact))
     }
     #endif
 }

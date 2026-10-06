@@ -2433,10 +2433,22 @@ struct MainTabView: View {
         .modifier(AudioPlayerPresentationModifier(router: router))
         .modifier(PlayerPresentationModifier(router: router))
         .sheet(
-            item: $router.presentedItemDetail,
+            item: itemDetailBinding(fillsWindow: false),
             onDismiss: { router.itemDetailPresentationDidDismiss() }
         ) { presentation in
             ItemDetailSheet(presentation: presentation, router: router)
+        }
+        .fullScreenCover(
+            item: itemDetailBinding(fillsWindow: true),
+            onDismiss: { router.itemDetailPresentationDidDismiss() }
+        ) { presentation in
+            ItemDetailSheet(presentation: presentation, router: router)
+        }
+        .onGeometryChange(for: Bool.self) { proxy in
+            PhoneDetailHeroLayout.usesSplitLayout(pageSize: proxy.size, verticalSizeClass: vSize)
+        } action: { splitsDetail in
+            router.presentsItemDetailFullWindow = splitsDetail
+                && UIDevice.current.userInterfaceIdiom == .phone
         }
         .sheet(isPresented: Binding(
             get: { siloControl.isShowingRemoteControl },
@@ -2501,6 +2513,18 @@ struct MainTabView: View {
     }
 
     @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.verticalSizeClass) private var vSize
+
+    /// The open detail, routed to whichever presentation it opened in: the
+    /// sheet, or the full-window cover (`ItemDetailPresentation.fillsWindow`).
+    private func itemDetailBinding(fillsWindow: Bool) -> Binding<AppRouter.ItemDetailPresentation?> {
+        Binding(
+            get: {
+                router.presentedItemDetail?.fillsWindow == fillsWindow ? router.presentedItemDetail : nil
+            },
+            set: { router.presentedItemDetail = $0 }
+        )
+    }
     #endif
 
     /// Macs always use the sidebar. iPad uses it only while the app fills the
