@@ -69,8 +69,14 @@ enum LibraryVideoScope: String, Hashable {
         if initial.count >= target { return result(initial) }
         // A profile override (or a profile-added row) can change what the row
         // shows, but the section catalog source pages the admin definition.
-        // Keep the row's own scoped items rather than publish another row's.
-        if original.customized == true || original.isCustom == true { return result(initial) }
+        // Keep the row's own scoped items rather than publish another row's,
+        // and flag them incomplete unless the inline window proves the server
+        // ran out: fewer items than the shelf holds and no larger total.
+        if original.customized == true || original.isCustom == true {
+            let inlineIsExhaustive = original.items.count < target
+                && (original.totalCount ?? 0) <= original.items.count
+            return result(initial, incomplete: !inlineIsExhaustive)
+        }
         let originals = Dictionary(original.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         var visible: [SectionItem] = []
         var seen = Set<String>()

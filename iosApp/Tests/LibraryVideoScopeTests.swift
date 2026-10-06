@@ -189,17 +189,35 @@ final class LibraryVideoScopeTests: XCTestCase {
     func testProfileCustomizedShelvesAreNotRefilledFromTheAdminDefinition() async throws {
         let film = try item("film", "movie")
         let show = try item("show", "series")
-        for (customized, isCustom) in [(true, false), (false, true)] {
+        // (customized, isCustom, totalCount, expected incomplete): the row keeps
+        // its own items, and is only complete when the inline window is.
+        for (customized, isCustom, total, incomplete) in [(true, false, 21, true), (false, true, 21, true),
+                                                          (true, false, 2, false), (false, true, 2, false)] {
             let original = ResolvedSection(id: "random", sectionType: "random", title: "Random", featured: false,
-                                           itemLimit: 20, totalCount: 21, isCustom: isCustom,
+                                           itemLimit: 20, totalCount: total, isCustom: isCustom,
                                            customized: customized, items: [film, show])
             let result = try await LibraryVideoScope.series.refill(original) { (_: Int?) -> LibraryScopedPage<Int> in
                 XCTFail("A profile-customized row must not be refilled from the admin definition")
                 return LibraryScopedPage(items: [], next: nil)
             }
             XCTAssertEqual(result.section.items.map(\.id), ["show"])
-            XCTAssertFalse(result.incomplete)
+            XCTAssertEqual(result.incomplete, incomplete)
         }
+    }
+
+    /// A full customized window (20 movies, more behind it) cannot prove the
+    /// selected type is absent, so the empty Series row must report incomplete.
+    func testFullCustomizedWindowIsNeverReportedComplete() async throws {
+        let movies = try (0..<20).map { try item("m\($0)", "movie") }
+        let original = ResolvedSection(id: "random", sectionType: "random", title: "Random", featured: false,
+                                       itemLimit: 20, totalCount: 20, isCustom: false,
+                                       customized: true, items: movies)
+        let result = try await LibraryVideoScope.series.refill(original) { (_: Int?) -> LibraryScopedPage<Int> in
+            XCTFail("A profile-customized row must not be refilled from the admin definition")
+            return LibraryScopedPage(items: [], next: nil)
+        }
+        XCTAssertTrue(result.section.items.isEmpty)
+        XCTAssertTrue(result.incomplete)
     }
 
     func testEmptyPageWithContinuationKeepsPaging() async throws {
