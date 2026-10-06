@@ -17,6 +17,11 @@ struct TVLibraryTypeTabView: View {
     /// switches within a session (§8); cold start always lands on
     /// Recommended. Written by the cascade dropdown.
     @Binding var selectedPill: TVLibraryPill
+    /// Whether this body is a Movies/Series category tab, which narrows a
+    /// mixed library to that tab's media type. A pinned library shortcut
+    /// passes false: the user picked the whole library, not a video tab, so
+    /// a mixed library keeps both movies and series.
+    var scopesMixedLibraries: Bool = true
     var focusRequest: Int = 0
     var isTopMenuFocused: Bool = false
     let onTopMenuFocusRequest: (() -> Void)?
@@ -59,8 +64,23 @@ struct TVLibraryTypeTabView: View {
     }
 
     private var mediaScope: LibraryVideoScope? {
-        guard activeLibrary?.isMixedLibrary == true else { return nil }
-        return LibraryVideoScope(rawValue: type == .movies ? "movie" : type == .series ? "series" : "")
+        Self.mediaScope(for: type, library: activeLibrary, scopesMixedLibraries: scopesMixedLibraries)
+    }
+
+    /// The media type a mixed library is narrowed to. Only an explicitly
+    /// selected Movies or Series category tab narrows; single-type libraries
+    /// and library shortcuts are never narrowed.
+    static func mediaScope(
+        for type: TVLibraryTabType,
+        library: Library?,
+        scopesMixedLibraries: Bool
+    ) -> LibraryVideoScope? {
+        guard scopesMixedLibraries, library?.isMixedLibrary == true else { return nil }
+        switch type {
+        case .movies: return .movie
+        case .series: return .series
+        case .music, .audiobooks: return nil
+        }
     }
 
     @ViewBuilder

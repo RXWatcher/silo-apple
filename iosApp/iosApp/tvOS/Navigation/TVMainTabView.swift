@@ -458,6 +458,9 @@ struct TVMainTabView: View {
                     type: type,
                     activeLibrary: library,
                     selectedPill: shortcutPillSelection(for: libraryId, categoryType: type),
+                    // `type` only picks the pill vocabulary here; a shortcut
+                    // shows the whole library, so a mixed one stays unscoped.
+                    scopesMixedLibraries: false,
                     focusRequest: contentFocusRequest,
                     isTopMenuFocused: menuOwnsFocus,
                     onTopMenuFocusRequest: { focusTopMenuIfVisible() }
