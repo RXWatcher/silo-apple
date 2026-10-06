@@ -237,6 +237,17 @@ final class LibraryVideoScopeTests: XCTestCase {
         XCTAssertFalse(LibraryVideoScope.series.contains("audiobook"))
     }
 
+    func testScopesAcceptEverySiloMediaTypeSpelling() {
+        for type in ["movie", "Movies", "film"] {
+            XCTAssertTrue(LibraryVideoScope.movie.contains(type), type)
+            XCTAssertFalse(LibraryVideoScope.series.contains(type), type)
+        }
+        for type in ["series", "show", "shows", "tv", "tvshows", "episode", " Episodes "] {
+            XCTAssertTrue(LibraryVideoScope.series.contains(type), type)
+            XCTAssertFalse(LibraryVideoScope.movie.contains(type), type)
+        }
+    }
+
     #if os(tvOS)
     func testOnlyAnExplicitVideoTabNarrowsAMixedLibrary() {
         let mixed = Library(id: 1, name: "Everything", type: "mixed", sortOrder: nil)

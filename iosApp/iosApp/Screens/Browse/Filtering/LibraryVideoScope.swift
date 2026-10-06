@@ -4,11 +4,15 @@ import Foundation
 enum LibraryVideoScope: String, Hashable {
     case movie, series
 
+    /// Reuses ``SiloMediaType`` so every spelling it accepts (e.g. `tvshows`,
+    /// `episodes`) stays in scope; `film` is an extra movie alias.
     func contains(_ type: String) -> Bool {
-        let type = type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         switch self {
-        case .movie: return ["movie", "movies", "film"].contains(type)
-        case .series: return ["series", "show", "shows", "tv", "episode"].contains(type)
+        case .movie:
+            return SiloMediaType.isMovieLibrary(type)
+                || type.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "film"
+        case .series:
+            return SiloMediaType.isSeries(type) || SiloMediaType.isEpisode(type)
         }
     }
 
