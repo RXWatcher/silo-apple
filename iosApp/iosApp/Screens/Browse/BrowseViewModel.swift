@@ -42,13 +42,7 @@ class BrowseViewModel {
         if libraryChanged {
             // Invalidate before metadata I/O so an old page cannot publish while
             // the next library or type is being configured.
-            generation += 1
-            continuation = nil
-            items = []
-            hasMore = true
-            hasLoaded = false
-            isLoading = false
-            error = nil
+            invalidatePages()
         }
         let resolvedMediaType = await resolveMediaType(libraryId: libraryId, libraryType: libraryType)
         guard myConfiguration == configurationGeneration, !Task.isCancelled else { return false }
@@ -59,6 +53,9 @@ class BrowseViewModel {
         mediaType = mediaScope.map { $0 == .movie ? .movie : .series } ?? resolvedMediaType
 
         if libraryChanged {
+            // A load-more during the metadata await read the old library or
+            // type under the new generation; drop it before the new scope loads.
+            invalidatePages()
             filterState = BrowsePrefsStore.shared.savedState(libraryId: libraryId, mediaScope: mediaScope?.rawValue) ?? .none
             if mediaScope != nil { filterState.mediaScope = nil }
         }
@@ -106,7 +103,8 @@ class BrowseViewModel {
                 )
             }
             // Discard if another reset superseded us while we awaited.
-            guard myGeneration == generation, !Task.isCancelled else { return }
+            guard myGeneration == generation else { return }
+            guard !Task.isCancelled else { return cancelLoading(for: myGeneration) }
 
             startsOver = startsOver || page.startsOver
             if startsOver {
@@ -130,7 +128,8 @@ class BrowseViewModel {
             continuation = page.continuation
             hasMore = page.continuation != nil
         } catch let err {
-            guard myGeneration == generation, !Task.isCancelled else { return }
+            guard myGeneration == generation else { return }
+            guard !Task.isCancelled else { return cancelLoading(for: myGeneration) }
             if items.isEmpty {
                 self.error = ErrorState(err)
             }
@@ -215,6 +214,23 @@ class BrowseViewModel {
         items = cached.items
         hasMore = cached.hasMore ?? false
         refineMediaType(from: cached)
+    }
+
+    private func invalidatePages() {
+        generation += 1
+        continuation = nil
+        items = []
+        hasMore = true
+        hasLoaded = false
+        isLoading = false
+        error = nil
+    }
+
+    /// A cancelled load publishes nothing but must release `isLoading`, or
+    /// load-more stays blocked until the next reset.
+    private func cancelLoading(for cancelledGeneration: Int) {
+        guard cancelledGeneration == generation else { return }
+        isLoading = false
     }
 
     private func finishLoading(for completedGeneration: Int) {
