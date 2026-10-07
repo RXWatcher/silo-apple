@@ -518,8 +518,12 @@ struct LibraryCollectionsView: View {
     @State private var uiCustomization = UICustomizationPreferences.shared
     @State private var gridWidth: CGFloat = 0
     @Environment(\.horizontalSizeClass) private var hSize
+    @Environment(\.verticalSizeClass) private var vSize
 
     private var columns: [GridItem] {
+        if let fit = widePhonePosterFit {
+            return fit.columns
+        }
         if usesThreeColumnPhoneLayout {
             return Array(
                 repeating: GridItem(.flexible(), spacing: 12),
@@ -616,7 +620,19 @@ struct LibraryCollectionsView: View {
         #endif
     }
 
+    /// A phone window too wide for three-up cards (the iPhone Duo's inner
+    /// display) fills the row with more columns.
+    private var widePhonePosterFit: AdaptiveColumns.PosterGridFit? {
+        guard usesThreeColumnPhoneLayout else { return nil }
+        return AdaptiveColumns.widePhonePosterFit(
+            containerWidth: gridWidth,
+            posterSize: uiCustomization.cardPresentation.posterSize,
+            verticalSizeClass: vSize
+        )
+    }
+
     private var libraryCollectionCardWidthOverride: CGFloat? {
+        if let fit = widePhonePosterFit { return fit.cardWidth }
         guard usesThreeColumnPhoneLayout else { return nil }
         return AdaptiveColumns.fittedPosterWidth(
             containerWidth: gridWidth,
@@ -750,7 +766,10 @@ struct LibraryCollectionDetailView: View {
             }
         }
         .siloPageBackground()
-        .environment(\.browseLibraryId, libraryId)
+        // Collection items can live in other libraries, and a library-scoped
+        // item read 404s for those. Keep cards and play actions unscoped, like
+        // the web client.
+        .environment(\.browseLibraryId, nil)
         .navigationTitle(title ?? "Collection")
         .siloNavigationTitleDisplayMode(.large)
         .task(id: "\(libraryId)-\(collectionId)-\(mediaScope?.rawValue ?? "all")-\(kind?.rawValue ?? "regular")") {
@@ -786,7 +805,7 @@ struct LibraryCollectionDetailView: View {
                     hasMore: viewModel.hasMore,
                     forcesThreeColumnsOnPhone: true,
                     onItemTap: { item in
-                        router.navigate(to: .itemDetail(browseItem: item, libraryId: libraryId))
+                        router.navigate(to: .itemDetail(browseItem: item))
                     },
                     onLoadMore: {
                         Task { await loadMoreIfNeeded() }
