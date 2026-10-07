@@ -6,6 +6,17 @@ struct BrowseItem: Codable, Identifiable, Hashable {
     let contentId: String
     let type: String
     let title: String
+    /// Episode / progress fields carried by section-sourced catalog pages
+    /// (e.g. a Continue Watching shelf paged through `source=section`).
+    /// Defaulted so the memberwise init and synthesized decoder stay intact.
+    var seriesId: String? = nil
+    var seriesTitle: String? = nil
+    var seasonNumber: Int? = nil
+    var episodeNumber: Int? = nil
+    var itemSource: String? = nil
+    var positionSeconds: Double? = nil
+    var durationSeconds: Double? = nil
+    var progressUpdatedAt: String? = nil
     let year: Int?
     let genres: [String]?
     let contentRating: String?
@@ -164,10 +175,10 @@ struct SectionItem: Codable, Identifiable, Hashable {
         networks = item.networks
         showStatus = item.showStatus
         overview = item.overview
-        itemSource = nil
-        self.positionSeconds = positionSeconds
-        self.durationSeconds = durationSeconds
-        progressUpdatedAt = nil
+        itemSource = item.itemSource
+        self.positionSeconds = positionSeconds ?? item.positionSeconds
+        self.durationSeconds = durationSeconds ?? item.durationSeconds
+        progressUpdatedAt = item.progressUpdatedAt
         posterUrl = item.posterUrl
         posterThumbhash = item.posterThumbhash
         backdropUrl = item.backdropUrl
@@ -277,6 +288,14 @@ extension BrowseItem {
             contentId: item.contentId,
             type: item.type,
             title: item.title,
+            seriesId: item.seriesId,
+            seriesTitle: item.seriesTitle,
+            seasonNumber: item.seasonNumber,
+            episodeNumber: item.episodeNumber,
+            itemSource: item.itemSource,
+            positionSeconds: item.positionSeconds,
+            durationSeconds: item.durationSeconds,
+            progressUpdatedAt: item.progressUpdatedAt,
             year: item.year,
             genres: item.genres,
             contentRating: item.contentRating,
