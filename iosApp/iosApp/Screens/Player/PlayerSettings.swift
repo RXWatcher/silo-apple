@@ -198,6 +198,7 @@ final class PlayerSettings {
     /// it means and each table interprets it rather than owning it.
     private(set) var preferredQualityResolution: String {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(preferredQualityResolution, forKey: Self.cacheKey(Keys.preferredQuality))
         }
     }
@@ -205,6 +206,7 @@ final class PlayerSettings {
     /// The bandwidth half of the quality preference; nil is uncapped.
     private(set) var maxBitrateKbps: Int? {
         didSet {
+            guard !isLoadingCache else { return }
             let key = Self.cacheKey(Keys.maxBitrateKbps)
             // Removed rather than stored as a sentinel, so "uncapped" is the
             // absence of a value locally exactly as it is on the wire.
@@ -252,7 +254,10 @@ final class PlayerSettings {
     }
 
     private(set) var audioLanguage: String {
-        didSet { defaults.set(audioLanguage, forKey: Self.cacheKey(Keys.audioLanguage)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(audioLanguage, forKey: Self.cacheKey(Keys.audioLanguage))
+        }
     }
 
     /// Deployment-observed choices returned with the effective audio setting.
@@ -262,6 +267,7 @@ final class PlayerSettings {
     /// What the player does when an intro starts — `playback.intro_skip_mode`.
     private(set) var introSkipMode: IntroSkipMode {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(introSkipMode.wireValue, forKey: Self.cacheKey(Keys.introSkipMode))
         }
     }
@@ -271,25 +277,37 @@ final class PlayerSettings {
     var autoSkipIntro: Bool { introSkipMode.legacyAutoSkip }
 
     private(set) var autoSkipCredits: Bool {
-        didSet { defaults.set(autoSkipCredits, forKey: Self.cacheKey(Keys.autoSkipCredits)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(autoSkipCredits, forKey: Self.cacheKey(Keys.autoSkipCredits))
+        }
     }
 
     private(set) var hdrEnabled: Bool {
-        didSet { defaults.set(hdrEnabled, forKey: Self.cacheKey(Keys.hdrEnabled)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(hdrEnabled, forKey: Self.cacheKey(Keys.hdrEnabled))
+        }
     }
 
     /// When off, Dolby Vision sources with a compatible base layer play as
     /// plain HDR10/HLG instead. Profile 5 has no such base layer and always
     /// plays in Dolby Vision.
     private(set) var dolbyVisionEnabled: Bool {
-        didSet { defaults.set(dolbyVisionEnabled, forKey: Self.cacheKey(Keys.dolbyVisionEnabled)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(dolbyVisionEnabled, forKey: Self.cacheKey(Keys.dolbyVisionEnabled))
+        }
     }
 
     /// Retained as the cross-client buffering preference. Aether owns the
     /// cache implementation; the adapter maps this preference without
     /// constructing a Silo source cache.
     private(set) var seekCacheEnabled: Bool {
-        didSet { defaults.set(seekCacheEnabled, forKey: Self.cacheKey(Keys.seekCacheEnabled)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(seekCacheEnabled, forKey: Self.cacheKey(Keys.seekCacheEnabled))
+        }
     }
 
     /// Device-local: when true, codecs Aether cannot stream-copy (TrueHD,
@@ -303,6 +321,7 @@ final class PlayerSettings {
     /// engine always used.
     private(set) var losslessAudioEnabled: Bool {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(losslessAudioEnabled, forKey: Self.cacheKey(Keys.losslessAudioEnabled))
         }
     }
@@ -319,6 +338,7 @@ final class PlayerSettings {
     /// their controller never reads this and always keeps playing.
     private(set) var backgroundPlaybackEnabled: Bool {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 backgroundPlaybackEnabled,
                 forKey: Self.cacheKey(Keys.backgroundPlaybackEnabled)
@@ -333,6 +353,7 @@ final class PlayerSettings {
     /// the historical behaviour of deriving the window from ``seekCacheEnabled``.
     private(set) var bufferAhead: BufferAheadMode {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(bufferAhead.rawValue, forKey: Self.cacheKey(Keys.bufferAhead))
         }
     }
@@ -344,6 +365,7 @@ final class PlayerSettings {
     /// which is Aether's own default, so nothing changes until a user picks.
     private(set) var deinterlaceMode: DeinterlacePreference {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(deinterlaceMode.rawValue, forKey: Self.cacheKey(Keys.deinterlaceMode))
         }
     }
@@ -360,6 +382,7 @@ final class PlayerSettings {
     /// the room or the headphones, not the profile. Default on.
     private(set) var trueHDAtmosEnabled: Bool {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(trueHDAtmosEnabled, forKey: Self.cacheKey(Keys.trueHDAtmosEnabled))
         }
     }
@@ -372,6 +395,7 @@ final class PlayerSettings {
     /// default.
     private(set) var deinterlaceFieldRate: DeinterlaceFieldRatePreference {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 deinterlaceFieldRate.rawValue,
                 forKey: Self.cacheKey(Keys.deinterlaceFieldRate)
@@ -381,6 +405,7 @@ final class PlayerSettings {
 
     private(set) var subtitleAppearance: SubtitleAppearance {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 subtitleAppearance.sanitized().jsonString,
                 forKey: Self.cacheKey(Keys.subtitleAppearance)
@@ -393,6 +418,7 @@ final class PlayerSettings {
     /// not destroy the user's locally cached custom style.
     private var inheritedSubtitleAppearance: SubtitleAppearance {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 inheritedSubtitleAppearance.sanitized().jsonString,
                 forKey: Self.cacheKey(Keys.inheritedSubtitleAppearance)
@@ -402,6 +428,7 @@ final class PlayerSettings {
 
     private(set) var subtitleUsesDeviceAppearanceOverride: Bool {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 subtitleUsesDeviceAppearanceOverride,
                 forKey: Self.cacheKey(Keys.subtitleUsesDeviceAppearanceOverride)
@@ -415,6 +442,7 @@ final class PlayerSettings {
     /// about *this* device's accessibility configuration.
     private(set) var subtitleMatchesSystemAppearance: Bool {
         didSet {
+            guard !isLoadingCache else { return }
             defaults.set(
                 subtitleMatchesSystemAppearance,
                 forKey: Self.cacheKey(Keys.subtitleMatchesSystemAppearance)
@@ -436,30 +464,57 @@ final class PlayerSettings {
     }
 
     private(set) var subtitleSyncMs: Int {
-        didSet { defaults.set(subtitleSyncMs, forKey: Self.cacheKey(Keys.subtitleSyncMs)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(subtitleSyncMs, forKey: Self.cacheKey(Keys.subtitleSyncMs))
+        }
     }
 
     private(set) var playbackSpeed: Double {
-        didSet { defaults.set(playbackSpeed, forKey: Self.cacheKey(Keys.playbackSpeed)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(playbackSpeed, forKey: Self.cacheKey(Keys.playbackSpeed))
+        }
     }
 
     private(set) var videoGravity: VideoGravity {
-        didSet { defaults.set(videoGravity.rawValue, forKey: Self.cacheKey(Keys.videoGravity)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(videoGravity.rawValue, forKey: Self.cacheKey(Keys.videoGravity))
+        }
     }
 
     private(set) var playerOrientationMode: PlayerOrientationMode {
-        didSet { defaults.set(playerOrientationMode.rawValue, forKey: Self.cacheKey(Keys.playerOrientationMode)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(playerOrientationMode.rawValue, forKey: Self.cacheKey(Keys.playerOrientationMode))
+        }
     }
 
     private(set) var autoPlayNextEpisode: Bool {
-        didSet { defaults.set(autoPlayNextEpisode, forKey: Self.cacheKey(Keys.autoPlayNextEpisode)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(autoPlayNextEpisode, forKey: Self.cacheKey(Keys.autoPlayNextEpisode))
+        }
     }
 
     private(set) var nextUpPromptSeconds: Int {
-        didSet { defaults.set(nextUpPromptSeconds, forKey: Self.cacheKey(Keys.nextUpPromptSeconds)) }
+        didSet {
+            guard !isLoadingCache else { return }
+            defaults.set(nextUpPromptSeconds, forKey: Self.cacheKey(Keys.nextUpPromptSeconds))
+        }
     }
 
     private let defaults: UserDefaults
+
+    /// Set while ``applyCachedSettingsForCurrentScope()`` loads the cache.
+    ///
+    /// Every property above persists itself when set, and loading a key the
+    /// store does not hold assigns its fallback default. Written back, that
+    /// default would look like a value this device stored, and the one-time
+    /// legacy import would push it to the server as a device override that
+    /// hides the profile's own value.
+    @ObservationIgnored private var isLoadingCache = false
 
     /// Debounced writer for the canonical settings API. Owns the queue, the
     /// retry schedule and the held changes; see PlayerSettingsFlusher.swift.
@@ -484,34 +539,9 @@ final class PlayerSettings {
     ) {
         self.defaults = defaults
         self.flusher = flusher
-        defaults.register(defaults: [
-            Keys.preferredQuality: "auto",
-            // maxBitrateKbps deliberately has no registered default: the
-            // contract's default is null, and a registered value would make
-            // "uncapped" indistinguishable from "capped at that number".
-            Keys.audioLanguage: "",
-            Keys.autoSkipIntro: false,
-            Keys.autoSkipCredits: false,
-            Keys.hdrEnabled: true,
-            Keys.dolbyVisionEnabled: true,
-            Keys.seekCacheEnabled: true,
-            Keys.losslessAudioEnabled: true,
-            Keys.backgroundPlaybackEnabled: true,
-            Keys.bufferAhead: BufferAheadMode.automatic.rawValue,
-            Keys.deinterlaceMode: DeinterlacePreference.automatic.rawValue,
-            Keys.trueHDAtmosEnabled: true,
-            Keys.deinterlaceFieldRate: DeinterlaceFieldRatePreference.fullMotion.rawValue,
-            Keys.subtitleAppearance: SubtitleAppearance.default.jsonString,
-            Keys.inheritedSubtitleAppearance: SubtitleAppearance.default.jsonString,
-            Keys.subtitleUsesDeviceAppearanceOverride: false,
-            Keys.subtitleMatchesSystemAppearance: false,
-            Keys.subtitleSyncMs: 0,
-            Keys.playbackSpeed: 1.0,
-            Keys.videoGravity: VideoGravity.fit.rawValue,
-            Keys.playerOrientationMode: PlayerOrientationMode.landscapeLocked.rawValue,
-            Keys.autoPlayNextEpisode: true,
-            Keys.nextUpPromptSeconds: 30,
-        ])
+        // No `register(defaults:)`: every read below supplies its own
+        // fallback, and a registered value is indistinguishable from a stored
+        // one. The legacy import must only see values this device stored.
 
         preferredQualityResolution = Self.cachedQualityResolution(defaults)
         maxBitrateKbps = Self.cachedMaxBitrateKbps(defaults)
@@ -1104,11 +1134,17 @@ final class PlayerSettings {
         effectiveByKey[key]?.value.boolValue ?? fallback
     }
 
-    /// This device's locally cached values, as the contract's typed JSON.
+    /// The values this device actually stored, as the contract's typed JSON.
     ///
     /// Read once at the top of a refresh, before the server's answer is
     /// applied, so the one-time migration can tell a value this device has
     /// always held from one the server just handed back.
+    ///
+    /// Only keys present in the store appear. A key that was never stored has
+    /// no legacy value to carry over; filling in this client's default for it
+    /// would turn that default into a device override on the first refresh,
+    /// hiding whatever the profile chose (a fresh install would pin every
+    /// device to Auto quality and no audio language).
     ///
     /// The quality half is decomposed here for the same reason the setter
     /// decomposes it: a compound id like `1080p-high` is not a member of the
@@ -1116,81 +1152,110 @@ final class PlayerSettings {
     // Internal so the migration's lossless key coverage can be pinned by the
     // focused settings tests without reaching through a live server/profile.
     func legacySnapshot() -> [SettingKey: SettingJSONValue] {
+        var snapshot: [SettingKey: SettingJSONValue] = [:]
+
         // Both spellings appear here: the unscoped key predates per-scope
         // caching, and either may still hold a compound tier id from a build
         // before the axes were stored separately. The shared axes conversion
         // reduces any of them to a contract member without losing its cap.
-        let legacyQualityId = defaults.string(forKey: Self.cacheKey(Keys.preferredQuality))
-            ?? defaults.string(forKey: Keys.preferredQuality)
-        let legacyQualityAxes = AppleQualityAxes.split(
-            legacyQualityId ?? ApplePlaybackQuality.autoId
-        )
+        let legacyQualityId = storedString(Keys.preferredQuality, unscopedFallback: true)
+        if let legacyQualityId {
+            snapshot[.preferredQuality] = .string(AppleQualityAxes.split(legacyQualityId).resolution)
+        }
         // Builds before the contract stored Apple's compound rung id in the
         // quality key and had no companion bitrate key. Recover that rung's
         // cap only when no explicit axis exists; the separate key is always
-        // authoritative once present.
-        let legacyBitrateKbps = Self.cachedMaxBitrateKbps(defaults)
-            ?? legacyQualityAxes.bitrateKbps
-        let legacyAudioLanguage = defaults.string(forKey: Self.cacheKey(Keys.audioLanguage))
-            ?? defaults.string(forKey: Keys.audioLanguage)
-            ?? ""
-        let legacyIntroSkipMode = Self.cachedIntroSkipMode(defaults)
-        let legacyAppearance = SubtitleAppearance.decode(
-            from: defaults.string(forKey: Self.cacheKey(Keys.subtitleAppearance))
-                ?? defaults.string(forKey: Keys.subtitleAppearance)
-        )
-
-        var snapshot: [SettingKey: SettingJSONValue] = [
-            .preferredQuality: .string(legacyQualityAxes.resolution),
-            .maxBitrateKbps: legacyBitrateKbps.map { .int($0) } ?? .null,
-            .audioLanguage: legacyAudioLanguage.isEmpty ? .null : .string(legacyAudioLanguage),
-            .introSkipMode: .string(legacyIntroSkipMode.wireValue),
-            .autoSkipCredits: .bool(
+        // authoritative once present. The two axes are one preference, so a
+        // stored quality carries its bitrate half (uncapped is stored as the
+        // key's absence) and neither half is imported without being stored.
+        if legacyQualityId != nil || hasStoredValue(Keys.maxBitrateKbps) {
+            let legacyBitrateKbps = Self.cachedMaxBitrateKbps(defaults)
+                ?? legacyQualityId.flatMap { AppleQualityAxes.split($0).bitrateKbps }
+            snapshot[.maxBitrateKbps] = legacyBitrateKbps.map { .int($0) } ?? .null
+        }
+        if let legacyAudioLanguage = storedString(Keys.audioLanguage, unscopedFallback: true) {
+            snapshot[.audioLanguage] = legacyAudioLanguage.isEmpty ? .null : .string(legacyAudioLanguage)
+        }
+        if hasStoredValue(Keys.introSkipMode) || hasStoredValue(Keys.autoSkipIntro) {
+            snapshot[.introSkipMode] = .string(Self.cachedIntroSkipMode(defaults).wireValue)
+        }
+        if hasStoredValue(Keys.autoSkipCredits) {
+            snapshot[.autoSkipCredits] = .bool(
                 Self.cachedBool(defaults, key: Keys.autoSkipCredits, defaultValue: false)
-            ),
-            .autoPlayNext: .bool(
+            )
+        }
+        if hasStoredValue(Keys.autoPlayNextEpisode)
+            || defaults.object(forKey: Keys.legacyAutoPlayNextEpisode) != nil {
+            snapshot[.autoPlayNext] = .bool(
                 Self.cachedBool(
                     defaults,
                     key: Keys.autoPlayNextEpisode,
                     legacyKey: Keys.legacyAutoPlayNextEpisode,
                     defaultValue: true
                 )
-            ),
-            .nextUpPromptSeconds: .int(
+            )
+        }
+        if hasStoredValue(Keys.nextUpPromptSeconds) {
+            snapshot[.nextUpPromptSeconds] = .int(
                 Self.clampNextUpPromptSeconds(
                     Self.cachedInt(defaults, key: Keys.nextUpPromptSeconds, defaultValue: 30)
                 )
-            ),
-            .hdrEnabled: .bool(
+            )
+        }
+        if hasStoredValue(Keys.hdrEnabled) {
+            snapshot[.hdrEnabled] = .bool(
                 Self.cachedBool(defaults, key: Keys.hdrEnabled, defaultValue: true)
-            ),
-            .dolbyVisionEnabled: .bool(
+            )
+        }
+        if hasStoredValue(Keys.dolbyVisionEnabled) {
+            snapshot[.dolbyVisionEnabled] = .bool(
                 Self.cachedBool(defaults, key: Keys.dolbyVisionEnabled, defaultValue: true)
-            ),
-            .seekCacheEnabled: .bool(
+            )
+        }
+        if hasStoredValue(Keys.seekCacheEnabled) {
+            snapshot[.seekCacheEnabled] = .bool(
                 Self.cachedBool(defaults, key: Keys.seekCacheEnabled, defaultValue: true)
-            ),
-            .playbackSpeed: .double(
+            )
+        }
+        if hasStoredValue(Keys.playbackSpeed) {
+            snapshot[.playbackSpeed] = .double(
                 Self.clampPlaybackSpeed(
                     Self.cachedDouble(defaults, key: Keys.playbackSpeed, defaultValue: 1.0)
                 )
-            ),
-            .subtitleSyncMs: .int(defaults.integer(forKey: Self.cacheKey(Keys.subtitleSyncMs))),
-            .videoGravity: .string(
-                defaults.string(forKey: Self.cacheKey(Keys.videoGravity)) ?? VideoGravity.fit.rawValue
-            ),
-            .orientationMode: .string(
-                defaults.string(forKey: Self.cacheKey(Keys.playerOrientationMode))
-                    ?? PlayerOrientationMode.landscapeLocked.rawValue
-            ),
-        ]
-        if let appearance = try? SettingJSONValue.encoding(legacyAppearance) {
+            )
+        }
+        if hasStoredValue(Keys.subtitleSyncMs) {
+            snapshot[.subtitleSyncMs] = .int(defaults.integer(forKey: Self.cacheKey(Keys.subtitleSyncMs)))
+        }
+        if let videoGravity = storedString(Keys.videoGravity) {
+            snapshot[.videoGravity] = .string(videoGravity)
+        }
+        if let orientationMode = storedString(Keys.playerOrientationMode) {
+            snapshot[.orientationMode] = .string(orientationMode)
+        }
+        if let appearanceJSON = storedString(Keys.subtitleAppearance, unscopedFallback: true),
+           let appearance = try? SettingJSONValue.encoding(SubtitleAppearance.decode(from: appearanceJSON)) {
             snapshot[.subtitleAppearance] = appearance
         }
         return snapshot
     }
 
+    /// Whether the store holds a value for `baseKey` in the current scope.
+    private func hasStoredValue(_ baseKey: String) -> Bool {
+        defaults.object(forKey: Self.cacheKey(baseKey)) != nil
+    }
+
+    /// The stored string for `baseKey` in the current scope, or — when
+    /// `unscopedFallback` is set — under the unscoped key that predates
+    /// per-scope caching. Nil when neither was stored.
+    private func storedString(_ baseKey: String, unscopedFallback: Bool = false) -> String? {
+        defaults.string(forKey: Self.cacheKey(baseKey))
+            ?? (unscopedFallback ? defaults.string(forKey: baseKey) : nil)
+    }
+
     private func applyCachedSettingsForCurrentScope() {
+        isLoadingCache = true
+        defer { isLoadingCache = false }
         preferredQualityResolution = Self.cachedQualityResolution(defaults)
         maxBitrateKbps = Self.cachedMaxBitrateKbps(defaults)
         audioLanguage = defaults.string(forKey: Self.cacheKey(Keys.audioLanguage)) ?? ""

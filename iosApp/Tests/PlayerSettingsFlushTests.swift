@@ -1044,10 +1044,24 @@ final class PlayerSettingsFlushTests: XCTestCase {
 
     func testLegacySnapshotCoversEverySyncedDeviceSetting() throws {
         let harness = try PlayerSettingsHarness()
-        harness.settings.setDolbyVisionEnabled(false)
-        harness.settings.setSeekCacheEnabled(false)
+        let settings = harness.settings
+        // Store every synced key the way this device would have.
+        settings.setQualityPreset(try XCTUnwrap(SiloQualityPresets.preset(id: "1080p-high")))
+        settings.setAudioLanguage("ja")
+        settings.setIntroSkipMode(.never)
+        settings.setAutoSkipCredits(true)
+        settings.setAutoPlayNextEpisode(false)
+        settings.setNextUpPromptSeconds(45)
+        settings.setHDREnabled(false)
+        settings.setDolbyVisionEnabled(false)
+        settings.setSeekCacheEnabled(false)
+        settings.setPlaybackSpeed(1.5)
+        settings.setSubtitleSyncMs(-350)
+        settings.setVideoGravity(.fill)
+        settings.setPlayerOrientationMode(.rotateFreely)
+        settings.stageSubtitleAppearance(.default)
 
-        let snapshot = harness.settings.legacySnapshot()
+        let snapshot = settings.legacySnapshot()
 
         XCTAssertEqual(Set(snapshot.keys), Set(SettingKey.playerDeviceSettings))
         XCTAssertEqual(snapshot[.playerDolbyVisionEnabled], .bool(false))
@@ -1058,8 +1072,129 @@ final class PlayerSettingsFlushTests: XCTestCase {
         )
     }
 
+    // MARK: - Legacy import only carries stored values
+
+    /// A profile that chose 720p and English, and contract defaults for the
+    /// rest, as the server resolves them for a device with no overrides.
+    private func profileEffectiveValues() -> [EffectiveSettingValue] {
+        let profileValues: [SettingKey: SettingJSONValue] = [
+            .playbackPreferredQuality: .string("720p"),
+            .playbackAudioLanguage: .string("en"),
+        ]
+        let contractDefaults: [SettingKey: SettingJSONValue] = [
+            .playbackMaxBitrateKbps: .null,
+            .playbackIntroSkipMode: .string("ask"),
+            .playbackAutoSkipCredits: .bool(false),
+            .playbackAutoPlayNext: .bool(true),
+            .playbackNextUpPromptSeconds: .int(30),
+            .playbackSubtitleAppearance: .null,
+            .playerHdrEnabled: .bool(true),
+            .playerDolbyVisionEnabled: .bool(true),
+            .playerSeekCacheEnabled: .bool(true),
+            .playerPlaybackSpeed: .double(1.0),
+            .playerSubtitleSyncMs: .int(0),
+            .playerVideoGravity: .string("fit"),
+            .playerOrientationMode: .string("landscape_locked"),
+        ]
+        return SettingKey.playerDeviceSettings.map { key in
+            if let value = profileValues[key] {
+                return .init(key: key.rawValue, value: value, source: .scope(.profile), scope: .profile)
+            }
+            return .init(key: key.rawValue, value: contractDefaults[key] ?? .null, source: .contractDefault)
+        }
+    }
+
+    private func byKey(_ values: [EffectiveSettingValue]) -> [SettingKey: EffectiveSettingValue] {
+        var map: [SettingKey: EffectiveSettingValue] = [:]
+        for value in values {
+            if let key = value.settingKey { map[key] = value }
+        }
+        return map
+    }
+
+    func testAFreshInstallImportsNoDeviceSettings() async throws {
+        let harness = try PlayerSettingsHarness()
+        harness.transport.effective = profileEffectiveValues()
+
+        // Production captures the snapshot at the top of the refresh.
+        let snapshot = harness.settings.legacySnapshot()
+        XCTAssertTrue(snapshot.isEmpty, "a fresh install has no legacy values: \(snapshot)")
+        await harness.settings.refreshFromServer()
+
+        let imported = await harness.settings.importLegacySettingsIfNeeded(
+            scopeID: "fresh-install-test",
+            legacySnapshot: snapshot,
+            effectiveByKey: byKey(harness.transport.effective)
+        )
+
+        XCTAssertFalse(imported)
+        XCTAssertTrue(harness.transport.writes().isEmpty, "\(harness.transport.writes())")
+        XCTAssertEqual(harness.settings.preferredQualityResolution, "720p")
+        XCTAssertEqual(harness.settings.audioLanguage, "en")
+    }
+
+    /// Loading the cache assigns each missing key its default. A first refresh
+    /// that cannot reach the server must not leave those defaults behind for
+    /// the next refresh to mistake for legacy values.
+    func testAFailedFirstRefreshLeavesNothingForTheImport() async throws {
+        let harness = try PlayerSettingsHarness()
+        harness.transport.effectiveError = .transport(description: "offline")
+        await harness.settings.refreshFromServer()
+
+        XCTAssertTrue(harness.settings.legacySnapshot().isEmpty, "\(harness.settings.legacySnapshot())")
+    }
+
+    func testOnlyTheLegacyKeysThatWereStoredAreImported() async throws {
+        let harness = try PlayerSettingsHarness()
+        let settings = harness.settings
+        // A pre-contract build's unscoped audio key, and one value set through
+        // the player. Quality and everything else were never stored.
+        harness.defaults.set("fr", forKey: "preferredAudioLanguage")
+        settings.setHDREnabled(false)
+        await settings.flushPendingDeviceSettings()
+        harness.transport.reset()
+
+        let snapshot = settings.legacySnapshot()
+        XCTAssertEqual(Set(snapshot.keys), [.playbackAudioLanguage, .playerHdrEnabled])
+
+        let imported = await settings.importLegacySettingsIfNeeded(
+            scopeID: "partial-legacy-test",
+            legacySnapshot: snapshot,
+            effectiveByKey: byKey(profileEffectiveValues())
+        )
+
+        XCTAssertTrue(imported)
+        let writes = harness.transport.writesByKey()
+        XCTAssertEqual(Set(writes.keys), [.playbackAudioLanguage, .playerHdrEnabled])
+        XCTAssertEqual(writes[.playbackAudioLanguage]?.value, .string("fr"))
+        XCTAssertEqual(writes[.playerHdrEnabled]?.value, .bool(false))
+        XCTAssertEqual(settings.preferredQualityResolution, "720p", "the profile's quality stays in effect")
+    }
+
+    func testAStoredLegacyQualityStillImports() async throws {
+        let harness = try PlayerSettingsHarness()
+        harness.defaults.set("1080p-high", forKey: "preferredQuality")
+
+        let snapshot = harness.settings.legacySnapshot()
+        let imported = await harness.settings.importLegacySettingsIfNeeded(
+            scopeID: "stored-legacy-quality-test",
+            legacySnapshot: snapshot,
+            effectiveByKey: byKey(profileEffectiveValues())
+        )
+
+        XCTAssertTrue(imported)
+        let writes = harness.transport.writesByKey()
+        XCTAssertEqual(Set(writes.keys), [.playbackPreferredQuality, .playbackMaxBitrateKbps])
+        XCTAssertEqual(writes[.playbackPreferredQuality]?.value, .string("1080p"))
+        XCTAssertEqual(writes[.playbackMaxBitrateKbps]?.value, .int(20_000))
+        XCTAssertEqual(harness.settings.preferredQualityResolution, "1080p")
+    }
+
     func testLegacyAppleSubtitleDefaultIsMigratedWithoutACustomOverride() async throws {
         let harness = try PlayerSettingsHarness()
+        // What a pre-contract build kept for a device that never customized
+        // its subtitles: Apple's shipped appearance, under the unscoped key.
+        harness.defaults.set(SubtitleAppearance.default.jsonString, forKey: "player.subtitleAppearance")
         // Production imports only after a read has reported the server's
         // revision, which the subtitle-appearance write waits for.
         await harness.settings.refreshFromServer()
@@ -1265,6 +1400,7 @@ final class PlayerSettingsFlushTests: XCTestCase {
         let harness = try PlayerSettingsHarness()
         let olderRevision = SettingKey.subtitleTextOpacityRevision - 1
         harness.transport.revision = olderRevision
+        harness.defaults.set(SubtitleAppearance.default.jsonString, forKey: "player.subtitleAppearance")
         await harness.settings.refreshFromServer()
         harness.transport.reset()
 
