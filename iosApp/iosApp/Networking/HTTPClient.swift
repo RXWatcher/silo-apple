@@ -1265,7 +1265,10 @@ actor HTTPClient {
         let path = request.url?.path ?? ""
         // Skip auth injection for /auth/refresh (avoid recursion) and
         // /auth/login (a prior expired token can't authorize a fresh login).
+        // The device identity still goes on: a sign-in records it on the
+        // login session it opens.
         if Self.isPublicAuthPath(path) {
+            attachIdentityAndTrace(&request, path: path, credentials: [])
             return
         }
 
@@ -1293,7 +1296,10 @@ actor HTTPClient {
         auth: CapturedOrdinaryRequestAuth
     ) {
         let path = request.url?.path ?? ""
+        // Public auth paths carry no credentials, only the device identity
+        // (see `attachLegacyAuthHeaders`).
         if Self.isPublicAuthPath(path) {
+            attachIdentityAndTrace(&request, path: path, credentials: [])
             return
         }
 
@@ -2222,8 +2228,8 @@ actor HTTPClient {
     static let refreshPath = "/api/v2/auth/refresh"
 
     /// The request every refresh path sends: `POST <server>/api/v2/auth/refresh`
-    /// with the refresh token as a JSON body and no bearer. Nil when the
-    /// server URL or the body is unusable.
+    /// with the refresh token as a JSON body, the device identity headers, and
+    /// no bearer. Nil when the server URL or the body is unusable.
     static func makeRefreshRequest(serverURL: String, refreshToken: String, encoder: JSONEncoder) -> URLRequest? {
         guard let url = URL(string: serverURL + refreshPath),
               let body = try? encoder.encode(RefreshRequest(refreshToken: refreshToken)) else { return nil }
@@ -2231,6 +2237,7 @@ actor HTTPClient {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        AppleDeviceIdentity.current.applyHeaders(to: &request)
         request.httpBody = body
         return request
     }

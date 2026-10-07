@@ -97,6 +97,95 @@ final class AuthDeviceV2Tests: XCTestCase {
         XCTAssertNil(request.header("x-profile-token"))
     }
 
+    // MARK: - Device identity on sign-in
+
+    /// The server records the device on the login session a sign-in opens,
+    /// so every public auth request carries the identity headers while still
+    /// carrying no credentials.
+    private func assertDeviceIdentityWithoutCredentials(
+        _ request: StubURLProtocol.Request,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) {
+        let device = AppleDeviceIdentity.current
+        let label = "\(request.method) \(request.path)"
+        XCTAssertEqual(request.header("X-Silo-Device-Id"), device.id, label, file: file, line: line)
+        XCTAssertEqual(request.header("X-Silo-Device-Name"), device.name, label, file: file, line: line)
+        XCTAssertEqual(request.header("X-Silo-Device-Platform"), device.platform, label, file: file, line: line)
+        XCTAssertEqual(request.header("X-Silo-Client-Family"), device.clientFamily, label, file: file, line: line)
+        XCTAssertEqual(request.header("X-Silo-Client"), device.clientName, label, file: file, line: line)
+        XCTAssertEqual(request.header("X-Silo-Client-Version"), device.appVersion, label, file: file, line: line)
+        XCTAssertNil(request.header("authorization"), label, file: file, line: line)
+        XCTAssertNil(request.header("x-profile-id"), label, file: file, line: line)
+        XCTAssertNil(request.header("x-profile-token"), label, file: file, line: line)
+    }
+
+    /// Runs every sign-in the app sends through `HTTPClient` and checks each
+    /// request it dispatched.
+    private func assertSignInsCarryTheDeviceIdentity(
+        _ api: APIv2Client,
+        _ tokens: TokenStore,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) async throws {
+        let identityValue = await tokens.refreshAccountIdentity()
+        let identity = try XCTUnwrap(identityValue, file: file, line: line)
+
+        stub.reply(path: "/api/v2/auth/login", 200, Self.login_ok)
+        _ = try await api.login(username: "laura", password: "password", expectedAccount: identity)
+        stub.reply(path: APIv2Client.oauthCompletePath, 200, Self.login_ok)
+        _ = try await api.completeOAuthLogin(code: "code", codeVerifier: "verifier", expectedAccount: identity)
+        stub.reply(path: "/api/v2/auth/network/5/sign-in", 200, Self.login_ok)
+        _ = try await api.signInWithNetworkIdentity(apiPath: "/api/v2/auth/network/5/sign-in",
+                                                    expectedAccount: identity)
+        stub.reply(path: Self.capabilityPath, 200, Self.get_device_login_capability_ok)
+        _ = try await api.deviceLoginCapability(expectedAccount: identity)
+        stub.reply(path: Self.startPath, 201, Self.start_device_login_ok)
+        _ = try await api.startDeviceLogin(.init(deviceName: "TV", devicePlatform: "tvos"), expectedAccount: identity)
+        stub.reply(path: "/api/v2/auth/device/poll", 200,
+                   #"{"status":"pending","poll_after":5,"profile_id":"","profile_token":"","temporary":false}"#)
+        _ = try await api.pollDeviceLogin(deviceCode: "secret", expectedAccount: identity)
+
+        XCTAssertEqual(stub.requestedPaths, [
+            "/api/v2/auth/login", APIv2Client.oauthCompletePath, "/api/v2/auth/network/5/sign-in",
+            Self.capabilityPath, Self.startPath, "/api/v2/auth/device/poll",
+        ], file: file, line: line)
+        for request in stub.requests {
+            assertDeviceIdentityWithoutCredentials(request, file: file, line: line)
+        }
+    }
+
+    /// A fresh install has no session, so the requests take the client's
+    /// no-account header path.
+    func testSignInRequestsCarryTheDeviceIdentityOnAFreshInstall() async throws {
+        let (api, tokens) = try await harness()
+        try await assertSignInsCarryTheDeviceIdentity(api, tokens)
+    }
+
+    /// Signing in again over a saved session takes the captured-session
+    /// header path, which must also leave the bearer and profile off.
+    func testSignInRequestsCarryTheDeviceIdentityOverASavedSession() async throws {
+        let (api, tokens) = try await harness()
+        try await tokens.installAccountSession(accessToken: "acc", refreshToken: "ref", accountID: "1")
+        await tokens.setProfileId("profile")
+        _ = await tokens.setProfileToken("proof")
+        try await assertSignInsCarryTheDeviceIdentity(api, tokens)
+    }
+
+    func testTokenRefreshCarriesTheDeviceIdentityAndNoBearer() async throws {
+        let (api, tokens) = try await harness()
+        try await tokens.installAccountSession(accessToken: "expired", refreshToken: "ref", accountID: "1")
+        let accountValue = await tokens.refreshAccountIdentity()
+        let account = try XCTUnwrap(accountValue)
+        stub.reply(path: HTTPClient.refreshPath, 200, #"{"access_token":"fresh","refresh_token":"ref-2","expires_in":3600}"#)
+        stub.sequence([.json(401, #"{"type":"https://siloserver.org/docs/api/v2/problems/session_expired","title":"Session expired","status":401,"detail":"The session is no longer valid; sign in again."}"#)])
+        stub.reply(204, "")
+        try await api.logout(expectedAccount: account)
+
+        let refresh = try XCTUnwrap(stub.requests.first { $0.path == HTTPClient.refreshPath })
+        assertDeviceIdentityWithoutCredentials(refresh)
+    }
+
     func testHandoffDecisionRejectsChangedCapturedAccountBeforeDispatch() async throws {
         let (api, tokens) = try await harness()
         try await tokens.installAccountSession(accessToken: "old", refreshToken: "old-refresh", accountID: "1")
