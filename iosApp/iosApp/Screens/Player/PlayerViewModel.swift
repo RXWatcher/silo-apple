@@ -3631,6 +3631,13 @@ class PlayerViewModel {
             shouldPlayWhenReady: shouldPlayWhenReady
         )
         activeAetherLoadEpoch = loadEpoch
+        // A progressive remux opens at its stream origin, behind the position
+        // the caller just published. Clock updates earlier than `currentTime`
+        // are dropped as stale, so move it back to where the engine starts or
+        // the scrubber and progress stay frozen until playback catches up.
+        if spec.delivery == PlaybackProtocolV3.PlanDelivery.remuxProgressive {
+            currentTime = min(currentTime, spec.timeline.sourcePosition(forPlayerTime: spec.aetherStartPosition))
+        }
         // A new transport starts at its own position with its own reader.
         sourceWatch = PlaybackSourceWatch()
         establishedAetherLoadEpoch = nil
@@ -4252,6 +4259,27 @@ class PlayerViewModel {
             hasReachedEndOfFile = true
         }
 
+        // A progressive remux is one response the engine cannot reconnect: a
+        // connection dropped mid-film (a long pause is enough) ends the
+        // stream for good, and the engine reports it as a clean end without
+        // the stall the check above waits for. Reconnect where it dropped
+        // instead of parking the viewer at the end of a film they have not
+        // finished. The reconnect carries the viewer's pause and is bounded
+        // by its own attempt budget.
+        if isPremature, !isWatchPartyPlayback, offlinePlaybackContext == nil,
+           aetherPlaybackController.activeSpec?.delivery == PlaybackProtocolV3.PlanDelivery.remuxProgressive {
+            Self.logger.warning(
+                "[CMP] handleEndOfFile reconnecting progressive remux: premature EOF at \(observedPosition, privacy: .public)/\(safeDuration, privacy: .public)"
+            )
+            // Not a finish: the reconnect must not record the item as completed.
+            hasReachedEndOfFile = false
+            if beginReconnect(position: observedPosition, resume: aetherPlaybackController.shouldPlayWhenReady) {
+                currentTime = observedPosition
+                return
+            }
+            hasReachedEndOfFile = true
+        }
+
         if isPremature {
             Self.logger.warning(
                 "[CMP] handleEndOfFile suppressing autoplay: premature EOF at \(observedPosition, privacy: .public)/\(safeDuration, privacy: .public)"
@@ -4749,6 +4777,11 @@ class PlayerViewModel {
         origin: LoadOrigin = .userInitiated
     ) {
         guard !isDisposed else { return }
+        // A renewal still waiting on its progress sync belongs to the load
+        // this one replaces. Left pending, it would reload its own captured
+        // request over the item that is starting now.
+        staleSessionRecoveryTask?.cancel()
+        staleSessionRecoveryTask = nil
         #if os(iOS) || os(macOS)
         if refreshHomeAfterPlaybackWrite == nil {
             refreshHomeAfterPlaybackWrite = StartupContentPrefetcher.homeRefreshAfterPlaybackWrite()
@@ -5354,6 +5387,8 @@ class PlayerViewModel {
             guard !Task.isCancelled, !self.isDisposed else { return }
 
             self.progressTask?.cancel()
+            // This task is the renewal; the load it starts must not cancel it.
+            self.staleSessionRecoveryTask = nil
             self.beginFreshLoad(
                 request: renewalRequest,
                 progressPosition: nil,
