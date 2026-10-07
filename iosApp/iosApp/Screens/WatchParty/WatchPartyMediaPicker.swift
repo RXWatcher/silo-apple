@@ -745,6 +745,8 @@ private struct WatchPartyEpisodePicker: View {
     let purpose: WatchPartyPickerPurpose
     let series: BrowseItem
     var initialSeasonNumber: Int? = nil
+    /// The episode the viewer came from, when they browse its series.
+    var initialEpisodeId: String? = nil
     let onComplete: () -> Void
     @State private var seasons: [Season] = []
     @State private var episodes: [EpisodeListItem] = []
@@ -775,9 +777,16 @@ private struct WatchPartyEpisodePicker: View {
         #endif
     }
 
+    /// The episode the viewer came from, else their own next episode in this
+    /// season, as on the series page.
+    private var resumeEpisode: EpisodeListItem? {
+        episodes.first { $0.contentId == initialEpisodeId } ?? episodes.preferredResumeEpisode()
+    }
+
     #if os(tvOS)
+    /// The hero describes the resume episode until focus reaches the rail.
     private var focusedEpisode: EpisodeListItem? {
-        episodes.first { $0.contentId == focusedEpisodeId }
+        episodes.first { $0.contentId == focusedEpisodeId } ?? resumeEpisode
     }
 
     private var tvBody: some View {
@@ -827,6 +836,7 @@ private struct WatchPartyEpisodePicker: View {
                     .scrollClipDisabled()
                     .padding(.horizontal, -8)
                     .focusSection()
+                    .defaultFocus($focusedSeasonNumber, seasonNumber, priority: .userInitiated)
                     .padding(.bottom, 24)
                 }
                 Group {
@@ -853,6 +863,7 @@ private struct WatchPartyEpisodePicker: View {
                                 chosen = WatchPartyMediaChoice(series: series, episode: episode)
                             },
                             onFocusedEpisodeChange: { id in if let id { focusedEpisodeId = id } },
+                            currentContentId: resumeEpisode?.contentId,
                             baseCardWidth: 400,
                             cardSpacing: 36
                         )
@@ -879,6 +890,19 @@ private struct WatchPartyEpisodePicker: View {
 
     #if os(iOS)
     private var phoneBody: some View {
+        ScrollViewReader { proxy in
+            phoneList
+                .onChange(of: resumeEpisode?.contentId) { _, id in
+                    guard let id else { return }
+                    // Next tick, so the rows that just loaded are laid out.
+                    DispatchQueue.main.async {
+                        proxy.scrollTo(id, anchor: .center)
+                    }
+                }
+        }
+    }
+
+    private var phoneList: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 if !seasons.isEmpty {
@@ -909,6 +933,7 @@ private struct WatchPartyEpisodePicker: View {
                                     episodeRow(episode)
                                 }
                                 .buttonStyle(.plain)
+                                .id(episode.contentId)
                             }
                         }
                     }
@@ -972,10 +997,11 @@ private struct WatchPartyEpisodePicker: View {
             guard !Task.isCancelled, roomId == session.room?.roomId else { return }
             seasons = try values.map { try Season(catalog: $0) }.sortedForDisplay()
             // A retry keeps the season being viewed; the first load opens on
-            // the initial season.
+            // the initial season, else where the viewer left off, as the
+            // series page does.
             let target = seasons.first(where: { $0.seasonNumber == seasonNumber })
                 ?? seasons.first(where: { $0.seasonNumber == initialSeasonNumber })
-                ?? seasons.first(where: { $0.seasonNumber > 0 }) ?? seasons.first
+                ?? seasons.preferredResumeSeason()
             if seasonNumber == target?.seasonNumber { await loadEpisodes() }
             else { seasonNumber = target?.seasonNumber }
             if seasons.isEmpty { isLoading = false }
@@ -997,7 +1023,10 @@ private struct WatchPartyEpisodePicker: View {
             let values = try await SiloAPI.shared.apiV2Client.catalogEpisodes(seriesId: series.contentId,
                 seasonNumber: seasonNumber, imageSize: nil, auth: auth)
             guard !Task.isCancelled, roomId == session.room?.roomId, self.seasonNumber == seasonNumber else { return }
+            // In episode order, as on the series page, so the resume episode is
+            // the earliest unwatched one.
             episodes = try values.map { try EpisodeListItem(catalog: $0) }
+                .sorted { $0.episodeNumber < $1.episodeNumber }
         } catch {
             guard !Task.isCancelled, roomId == session.room?.roomId, self.seasonNumber == seasonNumber else { return }
             errorMessage = error.localizedDescription
@@ -1114,7 +1143,8 @@ private struct WatchPartyMediaChoiceView: View {
         #endif
         .navigationDestination(item: $browsedSeries) { series in
             WatchPartyEpisodePicker(session: session, purpose: purpose, series: series,
-                                    initialSeasonNumber: choice.seasonNumber, onComplete: onComplete)
+                                    initialSeasonNumber: choice.seasonNumber, initialEpisodeId: choice.contentId,
+                                    onComplete: onComplete)
         }
         .task(id: choice.contentId) {
             if session.capabilities?.memberState == true {

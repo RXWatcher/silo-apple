@@ -481,13 +481,7 @@ struct SeriesDetailContent<BelowOverview: View>: View {
            }) {
             return selected
         }
-        if let inProgress = episodes.first(where: { $0.userData?.isInProgress == true }) {
-            return inProgress
-        }
-        if let unwatched = episodes.first(where: { !($0.userData?.played ?? false) }) {
-            return unwatched
-        }
-        return episodes.first
+        return episodes.preferredResumeEpisode()
     }
 
     /// "Resume S2·E5" when the tap offers to resume, else "Play S2·E5". The
